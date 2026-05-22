@@ -25,7 +25,6 @@ const CONNECTION_TIMEOUT_MS = 8000;
 type HomeAssistantConfig = {
   url: string;
   token: string;
-  usingLegacyPublicNames: boolean;
 };
 
 export type HomeAssistantStatus =
@@ -138,30 +137,18 @@ let activeConnection: Connection | null = null;
 let activeConnectionKey: string | null = null;
 
 function getConfig(): HomeAssistantConfig | null {
-  const url = process.env.HA_URL || process.env.NEXT_PUBLIC_HA_URL;
-  const token = process.env.HA_TOKEN || process.env.NEXT_PUBLIC_HA_TOKEN;
+  const url = process.env.HA_URL;
+  const token = process.env.HA_TOKEN;
 
   if (!url || !token) {
     return null;
   }
 
-  return {
-    url,
-    token,
-    usingLegacyPublicNames:
-      (!process.env.HA_URL && Boolean(process.env.NEXT_PUBLIC_HA_URL)) ||
-      (!process.env.HA_TOKEN && Boolean(process.env.NEXT_PUBLIC_HA_TOKEN)),
-  };
+  return { url, token };
 }
 
-function getWarnings(config: HomeAssistantConfig): string[] {
-  if (!config.usingLegacyPublicNames) {
-    return [];
-  }
-
-  return [
-    "Using legacy NEXT_PUBLIC Home Assistant env names. Rename them to HA_URL and HA_TOKEN before production.",
-  ];
+function getWarnings(_: HomeAssistantConfig): string[] {
+  return [];
 }
 
 function getApiBaseUrl(config: HomeAssistantConfig) {

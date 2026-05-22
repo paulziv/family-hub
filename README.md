@@ -29,13 +29,22 @@ HA_URL="http://homeassistant.local:8123"
 HA_TOKEN="your-long-lived-access-token"
 ```
 
-Do not use `NEXT_PUBLIC_` names for Home Assistant credentials in production.
-Variables with that prefix are exposed to browser JavaScript.
+Use server-only `HA_URL` and `HA_TOKEN`. Do not use `NEXT_PUBLIC_*` names for
+Home Assistant credentials because those variables are exposed to browser
+JavaScript.
+
+You can start from the checked-in example file:
+
+```bash
+cp .env.example .env.local
+```
 
 The dashboard currently calls:
 
 - `/api/health` for a basic app health check
 - `/api/home-assistant/status` for Home Assistant connectivity and entity counts
+- `/api/home-assistant/tasks` for to-do lists and task actions
+- `/api/home-assistant/calendar` for upcoming events
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 

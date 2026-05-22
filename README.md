@@ -18,6 +18,25 @@ Open [http://localhost:3000](http://localhost:3000) with your browser to see the
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
+## Home Assistant
+
+Family Hub reads Home Assistant from server-side API routes. Configure these
+values in `.env.local` for local development and in your production runtime for
+deployment:
+
+```bash
+HA_URL="http://homeassistant.local:8123"
+HA_TOKEN="your-long-lived-access-token"
+```
+
+Do not use `NEXT_PUBLIC_` names for Home Assistant credentials in production.
+Variables with that prefix are exposed to browser JavaScript.
+
+The dashboard currently calls:
+
+- `/api/health` for a basic app health check
+- `/api/home-assistant/status` for Home Assistant connectivity and entity counts
+
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
 ## Learn More

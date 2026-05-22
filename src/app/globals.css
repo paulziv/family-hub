@@ -1,5 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
-
 :root {
   --background: #0f172a;
   --foreground: #f8fafc;
@@ -21,7 +19,7 @@
 }
 
 body {
-  font-family: 'Inter', sans-serif;
+  font-family: var(--font-geist-sans), sans-serif;
   color: var(--foreground);
   background-color: var(--background);
   min-height: 100vh;
@@ -84,6 +82,77 @@ body::after {
   font-weight: 600;
   margin-bottom: 1.5rem;
   letter-spacing: -0.02em;
+}
+
+.panel-actions {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.panel-actions .glass-header {
+  margin-bottom: 0;
+}
+
+.panel-detail {
+  margin-top: 1rem;
+  opacity: 0.86;
+}
+
+.panel-muted {
+  opacity: 0.8;
+}
+
+.panel-warning {
+  color: #facc15;
+  font-size: 0.9rem;
+  margin-top: 1rem;
+}
+
+.secondary-button {
+  appearance: none;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  color: var(--foreground);
+  cursor: pointer;
+  font: inherit;
+  padding: 0.55rem 1rem;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.secondary-button:hover {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+.status-meta {
+  color: rgba(248, 250, 252, 0.72);
+  font-size: 0.9rem;
+  margin-top: 0.35rem;
+}
+
+.entity-summary {
+  display: grid;
+  gap: 0.6rem;
+  margin-top: 1rem;
+}
+
+.entity-summary-row {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.entity-summary-row dt {
+  color: rgba(248, 250, 252, 0.76);
+}
+
+.entity-summary-row dd {
+  font-family: var(--font-geist-mono), monospace;
+  font-weight: 600;
 }
 
 .dashboard-container {

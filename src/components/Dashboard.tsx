@@ -1,11 +1,19 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { HomeAssistantStatus } from "@/lib/homeAssistant";
+import type {
+  HomeAssistantStatus,
+  HomeAssistantTasksResponse,
+} from "@/lib/homeAssistant";
 
 type LoadState =
   | { status: "loading" }
   | { status: "ready"; data: HomeAssistantStatus }
+  | { status: "error"; message: string };
+
+type TasksState =
+  | { status: "loading" }
+  | { status: "ready"; data: HomeAssistantTasksResponse }
   | { status: "error"; message: string };
 
 const DOMAIN_LABELS: Record<string, string> = {
@@ -26,6 +34,10 @@ export function Dashboard() {
   const [homeAssistant, setHomeAssistant] = useState<LoadState>({
     status: "loading",
   });
+  const [tasks, setTasks] = useState<TasksState>({ status: "loading" });
+  const [newTaskSummary, setNewTaskSummary] = useState("");
+  const [taskActionMessage, setTaskActionMessage] = useState<string | null>(null);
+  const [taskActionPending, setTaskActionPending] = useState(false);
 
   async function loadHomeAssistantStatus(signal?: AbortSignal) {
     try {
@@ -59,13 +71,75 @@ export function Dashboard() {
     }
   }
 
+  async function loadTasks(signal?: AbortSignal) {
+    try {
+      setTasks((current) =>
+        current.status === "ready" ? current : { status: "loading" },
+      );
+
+      const response = await fetch("/api/home-assistant/tasks", {
+        cache: "no-store",
+        signal,
+      });
+
+      if (!response.ok) {
+        throw new Error("Unable to load tasks.");
+      }
+
+      const data = (await response.json()) as HomeAssistantTasksResponse;
+      setTasks({ status: "ready", data });
+    } catch (error) {
+      if (signal?.aborted) {
+        return;
+      }
+
+      setTasks({
+        status: "error",
+        message: error instanceof Error ? error.message : "Unable to load tasks.",
+      });
+    }
+  }
+
+  async function updateTasks(body: Record<string, string>) {
+    setTaskActionPending(true);
+    setTaskActionMessage(null);
+
+    try {
+      const response = await fetch("/api/home-assistant/tasks", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+
+      const payload = (await response.json()) as
+        | HomeAssistantTasksResponse
+        | { error: string };
+
+      if (!response.ok) {
+        throw new Error("error" in payload ? payload.error : "Unable to update task.");
+      }
+
+      setTasks({ status: "ready", data: payload as HomeAssistantTasksResponse });
+    } catch (error) {
+      setTaskActionMessage(
+        error instanceof Error ? error.message : "Unable to update task.",
+      );
+    } finally {
+      setTaskActionPending(false);
+    }
+  }
+
   useEffect(() => {
     const controller = new AbortController();
 
     void loadHomeAssistantStatus(controller.signal);
+    void loadTasks(controller.signal);
 
     const refreshId = window.setInterval(() => {
       void loadHomeAssistantStatus(controller.signal);
+      void loadTasks(controller.signal);
     }, 60_000);
 
     return () => {
@@ -101,7 +175,38 @@ export function Dashboard() {
 
         <section className="glass-panel">
           <h2 className="glass-header">Tasks</h2>
-          <p className="panel-muted">No tasks for today. Great job!</p>
+          <TaskPanel
+            actionMessage={taskActionMessage}
+            actionPending={taskActionPending}
+            newTaskSummary={newTaskSummary}
+            onAddTask={async (entityId) => {
+              const summary = newTaskSummary.trim();
+
+              if (!summary) {
+                setTaskActionMessage("Enter a task first.");
+                return;
+              }
+
+              await updateTasks({
+                action: "add",
+                entityId,
+                summary,
+              });
+              setNewTaskSummary("");
+            }}
+            onCompleteTask={async (entityId, item) => {
+              await updateTasks({
+                action: "complete",
+                entityId,
+                item,
+              });
+            }}
+            onRefresh={() => {
+              void loadTasks();
+            }}
+            onSummaryChange={setNewTaskSummary}
+            state={tasks}
+          />
         </section>
 
         <section className="glass-panel">
@@ -159,6 +264,130 @@ function SmartHomeDetails({ state }: { state: LoadState }) {
         </p>
       ))}
     </>
+  );
+}
+
+type TaskPanelProps = {
+  actionMessage: string | null;
+  actionPending: boolean;
+  newTaskSummary: string;
+  onAddTask: (entityId: string) => Promise<void>;
+  onCompleteTask: (entityId: string, item: string) => Promise<void>;
+  onRefresh: () => void;
+  onSummaryChange: (value: string) => void;
+  state: TasksState;
+};
+
+function TaskPanel({
+  actionMessage,
+  actionPending,
+  newTaskSummary,
+  onAddTask,
+  onCompleteTask,
+  onRefresh,
+  onSummaryChange,
+  state,
+}: TaskPanelProps) {
+  if (state.status === "loading") {
+    return <p>Loading tasks...</p>;
+  }
+
+  if (state.status === "error") {
+    return <p>{state.message}</p>;
+  }
+
+  const { data } = state;
+
+  if (!data.configured) {
+    return <p>Configure HA_URL and HA_TOKEN to load tasks.</p>;
+  }
+
+  if (!data.connected) {
+    return <p>{data.error}</p>;
+  }
+
+  if (data.lists.length === 0) {
+    return (
+      <>
+        <p className="panel-muted">No Home Assistant to-do lists found.</p>
+        {data.warnings.map((warning) => (
+          <p className="panel-warning" key={warning}>
+            {warning}
+          </p>
+        ))}
+      </>
+    );
+  }
+
+  const primaryList = data.lists[0];
+
+  return (
+    <div className="task-panel">
+      <div className="panel-actions">
+        <p className="panel-muted">
+          {primaryList.name} · {primaryList.incompleteCount} open
+        </p>
+        <button className="secondary-button" onClick={onRefresh} type="button">
+          Refresh
+        </button>
+      </div>
+
+      <form
+        className="task-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void onAddTask(primaryList.entityId);
+        }}
+      >
+        <input
+          className="task-input"
+          disabled={actionPending}
+          onChange={(event) => {
+            onSummaryChange(event.target.value);
+          }}
+          placeholder="Add a task"
+          value={newTaskSummary}
+        />
+        <button className="secondary-button" disabled={actionPending} type="submit">
+          Add
+        </button>
+      </form>
+
+      {actionMessage ? <p className="panel-warning">{actionMessage}</p> : null}
+
+      {primaryList.items.length > 0 ? (
+        <ul className="task-list">
+          {primaryList.items.map((task) => (
+            <li className="task-list-item" key={task.uid}>
+              <div>
+                <p className="task-summary">{task.summary}</p>
+                {task.description ? (
+                  <p className="task-meta">{task.description}</p>
+                ) : null}
+              </div>
+              <button
+                className="secondary-button"
+                disabled={actionPending}
+                onClick={() => {
+                  void onCompleteTask(primaryList.entityId, task.uid);
+                }}
+                type="button"
+              >
+                Done
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="panel-muted">No open tasks. Great job!</p>
+      )}
+
+      {data.warnings.map((warning) => (
+        <p className="panel-warning" key={warning}>
+          {warning}
+        </p>
+      ))}
+    </div>
   );
 }
 

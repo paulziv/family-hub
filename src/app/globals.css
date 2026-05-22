@@ -110,6 +110,58 @@ body::after {
   margin-top: 1rem;
 }
 
+.task-panel {
+  display: grid;
+  gap: 1rem;
+}
+
+.task-form {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.task-input {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  color: var(--foreground);
+  flex: 1;
+  font: inherit;
+  min-width: 0;
+  padding: 0.8rem 1rem;
+}
+
+.task-input::placeholder {
+  color: rgba(248, 250, 252, 0.45);
+}
+
+.task-list {
+  display: grid;
+  gap: 0.75rem;
+  list-style: none;
+}
+
+.task-list-item {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 18px;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+  padding: 0.95rem 1rem;
+}
+
+.task-summary {
+  font-weight: 500;
+}
+
+.task-meta {
+  color: rgba(248, 250, 252, 0.68);
+  font-size: 0.9rem;
+  margin-top: 0.2rem;
+}
+
 .secondary-button {
   appearance: none;
   background: rgba(255, 255, 255, 0.08);

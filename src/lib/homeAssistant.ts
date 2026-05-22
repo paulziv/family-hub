@@ -55,6 +55,46 @@ export type HomeAssistantStatus =
       error: string;
     };
 
+export type HomeAssistantTaskItem = {
+  uid: string;
+  summary: string;
+  status: string;
+  due?: string;
+  dueDate?: string;
+  dueDatetime?: string;
+  description?: string;
+};
+
+export type HomeAssistantTaskList = {
+  entityId: string;
+  name: string;
+  incompleteCount: number;
+  items: HomeAssistantTaskItem[];
+};
+
+export type HomeAssistantTasksResponse =
+  | {
+      configured: false;
+      connected: false;
+      lists: [];
+      warnings: string[];
+      error: string;
+    }
+  | {
+      configured: true;
+      connected: true;
+      lists: HomeAssistantTaskList[];
+      warnings: string[];
+      updatedAt: string;
+    }
+  | {
+      configured: true;
+      connected: false;
+      lists: [];
+      warnings: string[];
+      error: string;
+    };
+
 let connectionPromise: Promise<Connection> | null = null;
 let activeConnection: Connection | null = null;
 let activeConnectionKey: string | null = null;
@@ -84,6 +124,17 @@ function getWarnings(config: HomeAssistantConfig): string[] {
   return [
     "Using legacy NEXT_PUBLIC Home Assistant env names. Rename them to HA_URL and HA_TOKEN before production.",
   ];
+}
+
+function getApiBaseUrl(config: HomeAssistantConfig) {
+  return config.url.replace(/\/$/, "");
+}
+
+function getApiHeaders(config: HomeAssistantConfig) {
+  return {
+    Authorization: `Bearer ${config.token}`,
+    "Content-Type": "application/json",
+  };
 }
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
@@ -174,6 +225,68 @@ function toErrorMessage(error: unknown): string {
   return "Unable to connect to Home Assistant.";
 }
 
+type TodoServiceResponse = {
+  changed_states: unknown[];
+  service_response?: Record<
+    string,
+    {
+      items?: Array<{
+        uid?: string;
+        summary?: string;
+        status?: string;
+        due?: string;
+        due_date?: string;
+        due_datetime?: string;
+        description?: string;
+      }>;
+    }
+  >;
+};
+
+function mapTaskItems(
+  items: NonNullable<
+    NonNullable<TodoServiceResponse["service_response"]>[string]["items"]
+  > = [],
+): HomeAssistantTaskItem[] {
+  return items.map((item) => ({
+    uid: item.uid ?? item.summary ?? crypto.randomUUID(),
+    summary: item.summary ?? "Untitled task",
+    status: item.status ?? "unknown",
+    due: item.due,
+    dueDate: item.due_date,
+    dueDatetime: item.due_datetime,
+    description: item.description,
+  }));
+}
+
+async function callTodoService(
+  config: HomeAssistantConfig,
+  service: string,
+  payload: Record<string, unknown>,
+  options?: { expectResponse?: boolean },
+) {
+  const query = options?.expectResponse ? "?return_response" : "";
+  const response = await fetch(
+    `${getApiBaseUrl(config)}/api/services/todo/${service}${query}`,
+    {
+      method: "POST",
+      headers: getApiHeaders(config),
+      body: JSON.stringify(payload),
+      cache: "no-store",
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(`Home Assistant ${service} failed with ${response.status}.`);
+  }
+
+  if (!options?.expectResponse) {
+    return null;
+  }
+
+  return (await response.json()) as TodoServiceResponse;
+}
+
 export async function getHomeAssistantStatus(): Promise<HomeAssistantStatus> {
   const config = getConfig();
 
@@ -216,4 +329,103 @@ export async function getHomeAssistantStatus(): Promise<HomeAssistantStatus> {
       error: toErrorMessage(error),
     };
   }
+}
+
+export async function getHomeAssistantTasks(): Promise<HomeAssistantTasksResponse> {
+  const config = getConfig();
+
+  if (!config) {
+    return {
+      configured: false,
+      connected: false,
+      lists: [],
+      warnings: [],
+      error: "Missing HA_URL or HA_TOKEN.",
+    };
+  }
+
+  try {
+    const connection = await withTimeout(
+      getConnection(config),
+      CONNECTION_TIMEOUT_MS,
+    );
+    const entities = await withTimeout(getStates(connection), CONNECTION_TIMEOUT_MS);
+    const todoEntities = entities.filter((entity) =>
+      entity.entity_id.startsWith("todo."),
+    );
+
+    const lists = await Promise.all(
+      todoEntities.map(async (entity) => {
+        const response = await callTodoService(
+          config,
+          "get_items",
+          {
+            entity_id: entity.entity_id,
+            status: ["needs_action"],
+          },
+          { expectResponse: true },
+        );
+        const items = mapTaskItems(
+          response?.service_response?.[entity.entity_id]?.items,
+        );
+
+        return {
+          entityId: entity.entity_id,
+          name:
+            (entity.attributes.friendly_name as string | undefined) ??
+            entity.entity_id,
+          incompleteCount: Number(entity.state) || items.length,
+          items,
+        };
+      }),
+    );
+
+    return {
+      configured: true,
+      connected: true,
+      lists,
+      warnings: getWarnings(config),
+      updatedAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    resetConnection();
+
+    return {
+      configured: true,
+      connected: false,
+      lists: [],
+      warnings: getWarnings(config),
+      error: toErrorMessage(error),
+    };
+  }
+}
+
+export async function addHomeAssistantTask(entityId: string, summary: string) {
+  const config = getConfig();
+
+  if (!config) {
+    throw new Error("Missing HA_URL or HA_TOKEN.");
+  }
+
+  await callTodoService(config, "add_item", {
+    entity_id: entityId,
+    item: summary,
+  });
+}
+
+export async function completeHomeAssistantTask(
+  entityId: string,
+  item: string,
+) {
+  const config = getConfig();
+
+  if (!config) {
+    throw new Error("Missing HA_URL or HA_TOKEN.");
+  }
+
+  await callTodoService(config, "update_item", {
+    entity_id: entityId,
+    item,
+    status: "completed",
+  });
 }

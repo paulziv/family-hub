@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type {
+  HomeAssistantCalendarResponse,
   HomeAssistantStatus,
   HomeAssistantTasksResponse,
 } from "@/lib/homeAssistant";
@@ -14,6 +15,11 @@ type LoadState =
 type TasksState =
   | { status: "loading" }
   | { status: "ready"; data: HomeAssistantTasksResponse }
+  | { status: "error"; message: string };
+
+type CalendarState =
+  | { status: "loading" }
+  | { status: "ready"; data: HomeAssistantCalendarResponse }
   | { status: "error"; message: string };
 
 const DOMAIN_LABELS: Record<string, string> = {
@@ -35,6 +41,7 @@ export function Dashboard() {
     status: "loading",
   });
   const [tasks, setTasks] = useState<TasksState>({ status: "loading" });
+  const [calendar, setCalendar] = useState<CalendarState>({ status: "loading" });
   const [newTaskSummary, setNewTaskSummary] = useState("");
   const [taskActionMessage, setTaskActionMessage] = useState<string | null>(null);
   const [taskActionPending, setTaskActionPending] = useState(false);
@@ -131,15 +138,47 @@ export function Dashboard() {
     }
   }
 
+  async function loadCalendar(signal?: AbortSignal) {
+    try {
+      setCalendar((current) =>
+        current.status === "ready" ? current : { status: "loading" },
+      );
+
+      const response = await fetch("/api/home-assistant/calendar", {
+        cache: "no-store",
+        signal,
+      });
+
+      if (!response.ok) {
+        throw new Error("Unable to load calendar.");
+      }
+
+      const data = (await response.json()) as HomeAssistantCalendarResponse;
+      setCalendar({ status: "ready", data });
+    } catch (error) {
+      if (signal?.aborted) {
+        return;
+      }
+
+      setCalendar({
+        status: "error",
+        message:
+          error instanceof Error ? error.message : "Unable to load calendar.",
+      });
+    }
+  }
+
   useEffect(() => {
     const controller = new AbortController();
 
     void loadHomeAssistantStatus(controller.signal);
     void loadTasks(controller.signal);
+    void loadCalendar(controller.signal);
 
     const refreshId = window.setInterval(() => {
       void loadHomeAssistantStatus(controller.signal);
       void loadTasks(controller.signal);
+      void loadCalendar(controller.signal);
     }, 60_000);
 
     return () => {
@@ -211,7 +250,12 @@ export function Dashboard() {
 
         <section className="glass-panel">
           <h2 className="glass-header">Calendar</h2>
-          <p className="panel-muted">No upcoming events.</p>
+          <CalendarPanel
+            onRefresh={() => {
+              void loadCalendar();
+            }}
+            state={calendar}
+          />
         </section>
       </div>
     </main>
@@ -389,6 +433,125 @@ function TaskPanel({
       ))}
     </div>
   );
+}
+
+function CalendarPanel({
+  onRefresh,
+  state,
+}: {
+  onRefresh: () => void;
+  state: CalendarState;
+}) {
+  if (state.status === "loading") {
+    return <p>Loading calendar...</p>;
+  }
+
+  if (state.status === "error") {
+    return <p>{state.message}</p>;
+  }
+
+  const { data } = state;
+
+  if (!data.configured) {
+    return <p>Configure HA_URL and HA_TOKEN to load calendars.</p>;
+  }
+
+  if (!data.connected) {
+    return <p>{data.error}</p>;
+  }
+
+  if (data.calendars.length === 0) {
+    return (
+      <>
+        <div className="panel-actions">
+          <p className="panel-muted">Upcoming events for the next 7 days</p>
+          <button className="secondary-button" onClick={onRefresh} type="button">
+            Refresh
+          </button>
+        </div>
+        <p className="panel-muted">No Home Assistant calendars found.</p>
+        {data.warnings.map((warning) => (
+          <p className="panel-warning" key={warning}>
+            {warning}
+          </p>
+        ))}
+      </>
+    );
+  }
+
+  const upcomingEvents = data.calendars
+    .flatMap((calendar) =>
+      calendar.events.map((event) => ({
+        ...event,
+        calendarName: calendar.name,
+      })),
+    )
+    .sort((left, right) => left.start.localeCompare(right.start))
+    .slice(0, 8);
+
+  return (
+    <div className="calendar-panel">
+      <div className="panel-actions">
+        <p className="panel-muted">Upcoming events for the next 7 days</p>
+        <button className="secondary-button" onClick={onRefresh} type="button">
+          Refresh
+        </button>
+      </div>
+
+      {upcomingEvents.length > 0 ? (
+        <ul className="calendar-list">
+          {upcomingEvents.map((event) => (
+            <li
+              className="calendar-list-item"
+              key={`${event.calendarName}-${event.summary}-${event.start}`}
+            >
+              <div>
+                <p className="task-summary">{event.summary}</p>
+                <p className="task-meta">
+                  {event.calendarName} · {formatCalendarRange(event.start, event.end, event.isAllDay)}
+                </p>
+                {event.location ? (
+                  <p className="task-meta">Location: {event.location}</p>
+                ) : null}
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="panel-muted">No upcoming events in the next 7 days.</p>
+      )}
+
+      {data.warnings.map((warning) => (
+        <p className="panel-warning" key={warning}>
+          {warning}
+        </p>
+      ))}
+    </div>
+  );
+}
+
+function formatCalendarRange(start: string, end: string, isAllDay: boolean) {
+  if (isAllDay) {
+    return new Date(`${start}T00:00:00`).toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+      weekday: "short",
+    });
+  }
+
+  const startDate = new Date(start);
+  const endDate = new Date(end);
+
+  return `${startDate.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    weekday: "short",
+    hour: "numeric",
+    minute: "2-digit",
+  })} - ${endDate.toLocaleTimeString(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  })}`;
 }
 
 function getSmartHomeStatus(state: LoadState) {

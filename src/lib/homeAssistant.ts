@@ -72,6 +72,21 @@ export type HomeAssistantTaskList = {
   items: HomeAssistantTaskItem[];
 };
 
+export type HomeAssistantCalendarEvent = {
+  summary: string;
+  start: string;
+  end: string;
+  isAllDay: boolean;
+  description?: string;
+  location?: string;
+};
+
+export type HomeAssistantCalendar = {
+  entityId: string;
+  name: string;
+  events: HomeAssistantCalendarEvent[];
+};
+
 export type HomeAssistantTasksResponse =
   | {
       configured: false;
@@ -91,6 +106,29 @@ export type HomeAssistantTasksResponse =
       configured: true;
       connected: false;
       lists: [];
+      warnings: string[];
+      error: string;
+    };
+
+export type HomeAssistantCalendarResponse =
+  | {
+      configured: false;
+      connected: false;
+      calendars: [];
+      warnings: string[];
+      error: string;
+    }
+  | {
+      configured: true;
+      connected: true;
+      calendars: HomeAssistantCalendar[];
+      warnings: string[];
+      updatedAt: string;
+    }
+  | {
+      configured: true;
+      connected: false;
+      calendars: [];
       warnings: string[];
       error: string;
     };
@@ -257,6 +295,45 @@ function mapTaskItems(
     dueDatetime: item.due_datetime,
     description: item.description,
   }));
+}
+
+type CalendarListItem = {
+  entity_id: string;
+  name: string;
+};
+
+type CalendarEventApiItem = {
+  summary?: string;
+  description?: string;
+  location?: string;
+  start?: {
+    date?: string;
+    dateTime?: string;
+  };
+  end?: {
+    date?: string;
+    dateTime?: string;
+  };
+};
+
+function mapCalendarEvent(
+  event: CalendarEventApiItem,
+): HomeAssistantCalendarEvent | null {
+  const start = event.start?.dateTime ?? event.start?.date;
+  const end = event.end?.dateTime ?? event.end?.date;
+
+  if (!start || !end || !event.summary) {
+    return null;
+  }
+
+  return {
+    summary: event.summary,
+    start,
+    end,
+    isAllDay: Boolean(event.start?.date && !event.start?.dateTime),
+    description: event.description,
+    location: event.location,
+  };
 }
 
 async function callTodoService(
@@ -428,4 +505,84 @@ export async function completeHomeAssistantTask(
     item,
     status: "completed",
   });
+}
+
+export async function getHomeAssistantCalendar(): Promise<HomeAssistantCalendarResponse> {
+  const config = getConfig();
+
+  if (!config) {
+    return {
+      configured: false,
+      connected: false,
+      calendars: [],
+      warnings: [],
+      error: "Missing HA_URL or HA_TOKEN.",
+    };
+  }
+
+  try {
+    await withTimeout(getConnection(config), CONNECTION_TIMEOUT_MS);
+
+    const now = new Date();
+    const windowEnd = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+    const calendarResponse = await fetch(`${getApiBaseUrl(config)}/api/calendars`, {
+      headers: getApiHeaders(config),
+      cache: "no-store",
+    });
+
+    if (!calendarResponse.ok) {
+      throw new Error(
+        `Home Assistant calendars failed with ${calendarResponse.status}.`,
+      );
+    }
+
+    const calendars = (await calendarResponse.json()) as CalendarListItem[];
+    const calendarData = await Promise.all(
+      calendars.map(async (calendar) => {
+        const eventsResponse = await fetch(
+          `${getApiBaseUrl(config)}/api/calendars/${calendar.entity_id}?start=${encodeURIComponent(
+            now.toISOString(),
+          )}&end=${encodeURIComponent(windowEnd.toISOString())}`,
+          {
+            headers: getApiHeaders(config),
+            cache: "no-store",
+          },
+        );
+
+        if (!eventsResponse.ok) {
+          throw new Error(
+            `Home Assistant calendar events failed with ${eventsResponse.status}.`,
+          );
+        }
+
+        const events = ((await eventsResponse.json()) as CalendarEventApiItem[])
+          .map(mapCalendarEvent)
+          .filter((event): event is HomeAssistantCalendarEvent => Boolean(event));
+
+        return {
+          entityId: calendar.entity_id,
+          name: calendar.name,
+          events,
+        };
+      }),
+    );
+
+    return {
+      configured: true,
+      connected: true,
+      calendars: calendarData,
+      warnings: getWarnings(config),
+      updatedAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    resetConnection();
+
+    return {
+      configured: true,
+      connected: false,
+      calendars: [],
+      warnings: getWarnings(config),
+      error: toErrorMessage(error),
+    };
+  }
 }

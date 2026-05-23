@@ -188,10 +188,44 @@ export function Dashboard() {
   }, []);
 
   const smartHomeStatus = getSmartHomeStatus(homeAssistant);
+  const overviewStats = buildOverviewStats(homeAssistant, tasks, calendar);
 
   return (
     <main className="dashboard-container">
-      <h1 className="page-title">Family Hub</h1>
+      <section className="hero-shell">
+        <div>
+          <p className="eyebrow">Home Assistant command center</p>
+          <h1 className="page-title">Family Hub</h1>
+          <p className="hero-copy">
+            One place for household status, shared tasks, upcoming events, and
+            kid workflows as they come online.
+          </p>
+        </div>
+        <div className="hero-chip-row">
+          <StatusChip label="Home" value={smartHomeStatus} tone={getStatusTone(smartHomeStatus)} />
+          <StatusChip
+            label="Tasks"
+            value={getTasksSummary(tasks)}
+            tone={tasks.status === "error" ? "warn" : "neutral"}
+          />
+          <StatusChip
+            label="Calendar"
+            value={getCalendarSummary(calendar)}
+            tone={calendar.status === "error" ? "warn" : "neutral"}
+          />
+        </div>
+      </section>
+
+      <section className="overview-grid">
+        {overviewStats.map((stat) => (
+          <article className="overview-card" key={stat.label}>
+            <p className="overview-label">{stat.label}</p>
+            <p className="overview-value">{stat.value}</p>
+            <p className="overview-note">{stat.note}</p>
+          </article>
+        ))}
+      </section>
+
       <div className="grid-layout">
         <section className="glass-panel">
           <div className="panel-actions">
@@ -257,8 +291,75 @@ export function Dashboard() {
             state={calendar}
           />
         </section>
+
+        <section className="glass-panel glass-panel-wide">
+          <h2 className="glass-header">Family Focus</h2>
+          <div className="focus-grid">
+            <FocusCard
+              title="Colton Chores"
+              detail="ChoreOps"
+              tone="pending"
+              body="Waiting for ChoreOps profile, chores, and rewards to be configured in Home Assistant."
+            />
+            <FocusCard
+              title="Shared Task List"
+              detail={getTasksSummary(tasks)}
+              tone={tasks.status === "ready" ? "good" : tasks.status === "error" ? "warn" : "pending"}
+              body="The household list is live through Home Assistant todo entities and can already be used from this dashboard."
+            />
+            <FocusCard
+              title="Family Calendar"
+              detail={getCalendarSummary(calendar)}
+              tone={calendar.status === "ready" ? "good" : calendar.status === "error" ? "warn" : "pending"}
+              body="The calendar panel is ready. It will begin surfacing real events as soon as Home Assistant exposes calendar entities."
+            />
+          </div>
+        </section>
+
+        <section className="glass-panel glass-panel-wide">
+          <h2 className="glass-header">Next Modules</h2>
+          <ul className="module-list">
+            <ModuleRow
+              title="Colton reward dashboard"
+              status="Next"
+              note="Show chores, points, streaks, and rewards once ChoreOps is configured."
+            />
+            <ModuleRow
+              title="Presence and routines"
+              status="Planned"
+              note="Use person, device_tracker, and calendar overlap to show who is home and what routine should run."
+            />
+            <ModuleRow
+              title="Household alerts"
+              status="Planned"
+              note="Surface battery, door, lock, leak, and climate exceptions instead of raw entity counts."
+            />
+            <ModuleRow
+              title="Parent controls"
+              status="Planned"
+              note="Approvals for kid chores, rewards, and important automations should live in one panel."
+            />
+          </ul>
+        </section>
       </div>
     </main>
+  );
+}
+
+function StatusChip({
+  label,
+  tone,
+  value,
+}: {
+  label: string;
+  tone: "good" | "neutral" | "warn";
+  value: string;
+}) {
+  return (
+    <div className={`status-chip status-chip-${tone}`}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
   );
 }
 
@@ -530,6 +631,46 @@ function CalendarPanel({
   );
 }
 
+function FocusCard({
+  body,
+  detail,
+  title,
+  tone,
+}: {
+  body: string;
+  detail: string;
+  title: string;
+  tone: "good" | "pending" | "warn";
+}) {
+  return (
+    <article className={`focus-card focus-card-${tone}`}>
+      <p className="focus-title">{title}</p>
+      <p className="focus-detail">{detail}</p>
+      <p className="focus-body">{body}</p>
+    </article>
+  );
+}
+
+function ModuleRow({
+  note,
+  status,
+  title,
+}: {
+  note: string;
+  status: string;
+  title: string;
+}) {
+  return (
+    <li className="module-row">
+      <div>
+        <p className="module-title">{title}</p>
+        <p className="module-note">{note}</p>
+      </div>
+      <span className="module-status">{status}</span>
+    </li>
+  );
+}
+
 function formatCalendarRange(start: string, end: string, isAllDay: boolean) {
   if (isAllDay) {
     return new Date(`${start}T00:00:00`).toLocaleDateString(undefined, {
@@ -568,4 +709,102 @@ function getSmartHomeStatus(state: LoadState) {
   }
 
   return state.data.connected ? "Connected" : "Connection Failed";
+}
+
+function getStatusTone(
+  value: string,
+): "good" | "neutral" | "warn" {
+  if (value === "Connected") {
+    return "good";
+  }
+
+  if (value === "Connection Failed" || value === "Unavailable") {
+    return "warn";
+  }
+
+  return "neutral";
+}
+
+function getTasksSummary(state: TasksState) {
+  if (state.status === "loading") {
+    return "Loading";
+  }
+
+  if (state.status === "error") {
+    return "Issue";
+  }
+
+  if (!state.data.connected || state.data.lists.length === 0) {
+    return "None";
+  }
+
+  return `${state.data.lists.reduce((sum, list) => sum + list.incompleteCount, 0)} open`;
+}
+
+function getCalendarSummary(state: CalendarState) {
+  if (state.status === "loading") {
+    return "Loading";
+  }
+
+  if (state.status === "error") {
+    return "Issue";
+  }
+
+  if (!state.data.connected || state.data.calendars.length === 0) {
+    return "No calendars";
+  }
+
+  const eventCount = state.data.calendars.reduce(
+    (sum, calendar) => sum + calendar.events.length,
+    0,
+  );
+
+  return `${eventCount} upcoming`;
+}
+
+function buildOverviewStats(
+  homeAssistant: LoadState,
+  tasks: TasksState,
+  calendar: CalendarState,
+) {
+  const deviceCount =
+    homeAssistant.status === "ready" && homeAssistant.data.connected
+      ? String(homeAssistant.data.entityCount)
+      : "—";
+  const taskCount =
+    tasks.status === "ready" && tasks.data.connected
+      ? String(tasks.data.lists.reduce((sum, list) => sum + list.incompleteCount, 0))
+      : "—";
+  const calendarCount =
+    calendar.status === "ready" && calendar.data.connected
+      ? String(
+          calendar.data.calendars.reduce(
+            (sum, entry) => sum + entry.events.length,
+            0,
+          ),
+        )
+      : "—";
+
+  return [
+    {
+      label: "Home entities",
+      value: deviceCount,
+      note: "The current Home Assistant footprint exposed to Family Hub.",
+    },
+    {
+      label: "Open tasks",
+      value: taskCount,
+      note: "Shared todos pulled from Home Assistant list entities.",
+    },
+    {
+      label: "Upcoming events",
+      value: calendarCount,
+      note: "Events in the next 7 days across connected calendars.",
+    },
+    {
+      label: "Kid system",
+      value: "Pending",
+      note: "ChoreOps will power chores, points, and rewards for Colton.",
+    },
+  ];
 }

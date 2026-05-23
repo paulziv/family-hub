@@ -86,6 +86,16 @@ export type HomeAssistantCalendar = {
   events: HomeAssistantCalendarEvent[];
 };
 
+export type HomeAssistantLight = {
+  entityId: string;
+  name: string;
+  state: string;
+  area: string | null;
+  brightnessPercent: number | null;
+  colorMode: string | null;
+  isAvailable: boolean;
+};
+
 export type HomeAssistantChoreOpsEntity = {
   entityId: string;
   name: string;
@@ -166,6 +176,29 @@ export type HomeAssistantCalendarResponse =
       configured: true;
       connected: false;
       calendars: [];
+      warnings: string[];
+      error: string;
+    };
+
+export type HomeAssistantLightsResponse =
+  | {
+      configured: false;
+      connected: false;
+      lights: [];
+      warnings: string[];
+      error: string;
+    }
+  | {
+      configured: true;
+      connected: true;
+      lights: HomeAssistantLight[];
+      warnings: string[];
+      updatedAt: string;
+    }
+  | {
+      configured: true;
+      connected: false;
+      lights: [];
       warnings: string[];
       error: string;
     };
@@ -434,6 +467,23 @@ function matchesChoreOpsEntity(entity: HassEntity) {
   );
 }
 
+function mapLightEntity(entity: HassEntity): HomeAssistantLight {
+  const brightness = entity.attributes.brightness;
+  return {
+    entityId: entity.entity_id,
+    name: getEntityName(entity),
+    state: entity.state,
+    area:
+      (entity.attributes.room as string | undefined) ??
+      (entity.attributes.area as string | undefined) ??
+      null,
+    brightnessPercent:
+      typeof brightness === "number" ? Math.round((brightness / 255) * 100) : null,
+    colorMode: (entity.attributes.color_mode as string | undefined) ?? null,
+    isAvailable: entity.state !== "unavailable",
+  };
+}
+
 export async function getHomeAssistantStatus(): Promise<HomeAssistantStatus> {
   const config = getConfig();
 
@@ -651,6 +701,55 @@ export async function getHomeAssistantCalendar(): Promise<HomeAssistantCalendarR
       configured: true,
       connected: false,
       calendars: [],
+      warnings: getWarnings(config),
+      error: toErrorMessage(error),
+    };
+  }
+}
+
+export async function getHomeAssistantLights(): Promise<HomeAssistantLightsResponse> {
+  const config = getConfig();
+
+  if (!config) {
+    return {
+      configured: false,
+      connected: false,
+      lights: [],
+      warnings: [],
+      error: "Missing HA_URL or HA_TOKEN.",
+    };
+  }
+
+  try {
+    const connection = await withTimeout(
+      getConnection(config),
+      CONNECTION_TIMEOUT_MS,
+    );
+    const entities = await withTimeout(getStates(connection), CONNECTION_TIMEOUT_MS);
+    const lights = entities
+      .filter((entity) => entity.entity_id.startsWith("light."))
+      .map(mapLightEntity)
+      .sort((left, right) => {
+        if (left.isAvailable !== right.isAvailable) {
+          return left.isAvailable ? -1 : 1;
+        }
+        return left.name.localeCompare(right.name);
+      });
+
+    return {
+      configured: true,
+      connected: true,
+      lights,
+      warnings: getWarnings(config),
+      updatedAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    resetConnection();
+
+    return {
+      configured: true,
+      connected: false,
+      lights: [],
       warnings: getWarnings(config),
       error: toErrorMessage(error),
     };

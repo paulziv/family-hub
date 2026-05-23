@@ -125,6 +125,11 @@ body::after {
   gap: 1rem;
 }
 
+.lights-panel {
+  display: grid;
+  gap: 1rem;
+}
+
 .task-form {
   display: flex;
   gap: 0.75rem;
@@ -222,6 +227,54 @@ body::after {
   color: rgba(248, 250, 252, 0.7);
   line-height: 1.45;
   margin-top: 0.55rem;
+}
+
+.lights-overview-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.lights-grid {
+  display: grid;
+  gap: 0.9rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  list-style: none;
+}
+
+.light-card {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 20px;
+  min-height: 136px;
+  padding: 1rem;
+}
+
+.light-card-live {
+  background: linear-gradient(180deg, rgba(56, 189, 248, 0.12), rgba(255, 255, 255, 0.03));
+}
+
+.light-card-offline {
+  background: linear-gradient(180deg, rgba(148, 163, 184, 0.10), rgba(255, 255, 255, 0.03));
+  opacity: 0.9;
+}
+
+.light-card-top {
+  align-items: start;
+  display: flex;
+  gap: 0.8rem;
+  justify-content: space-between;
+}
+
+.light-name {
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.light-meta {
+  color: rgba(248, 250, 252, 0.7);
+  line-height: 1.45;
+  margin-top: 0.45rem;
 }
 
 .task-summary {
@@ -596,7 +649,8 @@ body::after {
   .overview-grid,
   .today-grid,
   .focus-grid,
-  .choreops-status-grid {
+  .choreops-status-grid,
+  .lights-overview-grid {
     grid-template-columns: 1fr;
   }
 
@@ -605,12 +659,48 @@ body::after {
     flex-direction: column;
   }
 
-  .signal-grid {
+  .signal-grid,
+  .lights-grid {
     grid-template-columns: 1fr;
   }
 
   .module-row {
     align-items: start;
     flex-direction: column;
+  }
+}
+
+@media (min-width: 744px) and (max-width: 1180px) {
+  .hero-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .overview-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .today-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .focus-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .lights-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dashboard-container {
+    padding: 2rem 1.25rem 3rem;
+  }
+
+  .glass-panel {
+    padding: 1.5rem;
+  }
+
+  .secondary-button,
+  .task-input {
+    min-height: 48px;
   }
 }

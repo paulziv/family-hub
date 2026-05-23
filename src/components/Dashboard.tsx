@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import type {
   HomeAssistantCalendarResponse,
   HomeAssistantChoreOpsResponse,
+  HomeAssistantLightsResponse,
   HomeAssistantStatus,
   HomeAssistantTasksResponse,
 } from "@/lib/homeAssistant";
@@ -28,6 +29,11 @@ type ChoreOpsState =
   | { status: "ready"; data: HomeAssistantChoreOpsResponse }
   | { status: "error"; message: string };
 
+type LightsState =
+  | { status: "loading" }
+  | { status: "ready"; data: HomeAssistantLightsResponse }
+  | { status: "error"; message: string };
+
 const DOMAIN_LABELS: Record<string, string> = {
   binary_sensor: "Binary Sensors",
   calendar: "Calendars",
@@ -49,6 +55,7 @@ export function Dashboard() {
   const [tasks, setTasks] = useState<TasksState>({ status: "loading" });
   const [calendar, setCalendar] = useState<CalendarState>({ status: "loading" });
   const [choreOps, setChoreOps] = useState<ChoreOpsState>({ status: "loading" });
+  const [lights, setLights] = useState<LightsState>({ status: "loading" });
   const [newTaskSummary, setNewTaskSummary] = useState("");
   const [taskActionMessage, setTaskActionMessage] = useState<string | null>(null);
   const [taskActionPending, setTaskActionPending] = useState(false);
@@ -206,6 +213,35 @@ export function Dashboard() {
     }
   }
 
+  async function loadLights(signal?: AbortSignal) {
+    try {
+      setLights((current) =>
+        current.status === "ready" ? current : { status: "loading" },
+      );
+
+      const response = await fetch("/api/home-assistant/lights", {
+        cache: "no-store",
+        signal,
+      });
+
+      if (!response.ok) {
+        throw new Error("Unable to load lights.");
+      }
+
+      const data = (await response.json()) as HomeAssistantLightsResponse;
+      setLights({ status: "ready", data });
+    } catch (error) {
+      if (signal?.aborted) {
+        return;
+      }
+
+      setLights({
+        status: "error",
+        message: error instanceof Error ? error.message : "Unable to load lights.",
+      });
+    }
+  }
+
   useEffect(() => {
     const controller = new AbortController();
 
@@ -213,12 +249,14 @@ export function Dashboard() {
     void loadTasks(controller.signal);
     void loadCalendar(controller.signal);
     void loadChoreOps(controller.signal);
+    void loadLights(controller.signal);
 
     const refreshId = window.setInterval(() => {
       void loadHomeAssistantStatus(controller.signal);
       void loadTasks(controller.signal);
       void loadCalendar(controller.signal);
       void loadChoreOps(controller.signal);
+      void loadLights(controller.signal);
     }, 60_000);
 
     return () => {
@@ -238,7 +276,13 @@ export function Dashboard() {
   }, []);
 
   const smartHomeStatus = getSmartHomeStatus(homeAssistant);
-  const overviewStats = buildOverviewStats(homeAssistant, tasks, calendar, choreOps);
+  const overviewStats = buildOverviewStats(
+    homeAssistant,
+    tasks,
+    calendar,
+    choreOps,
+    lights,
+  );
   const householdSignals = buildHouseholdSignals(homeAssistant);
 
   return (
@@ -281,6 +325,11 @@ export function Dashboard() {
             value={getChoreOpsSummary(choreOps)}
             tone={getChoreOpsTone(choreOps)}
           />
+          <StatusChip
+            label="Lights"
+            value={getLightsSummary(lights)}
+            tone={getLightsTone(lights)}
+          />
         </div>
       </section>
 
@@ -316,6 +365,11 @@ export function Dashboard() {
             {getTodayChoreCopy(choreOps)}
           </p>
         </article>
+        <article className="today-card">
+          <p className="today-label">Lighting status</p>
+          <p className="today-title">{getTodayLightsHeadline(lights)}</p>
+          <p className="today-copy">{getTodayLightsCopy(lights)}</p>
+        </article>
       </section>
 
       <div className="grid-layout">
@@ -341,6 +395,16 @@ export function Dashboard() {
         <section className="glass-panel">
           <h2 className="glass-header">Household Signals</h2>
           <SignalPanel signals={householdSignals} />
+        </section>
+
+        <section className="glass-panel glass-panel-wide">
+          <h2 className="glass-header">Lights</h2>
+          <LightsPanel
+            onRefresh={() => {
+              void loadLights();
+            }}
+            state={lights}
+          />
         </section>
 
         <section className="glass-panel">
@@ -533,6 +597,85 @@ function SignalPanel({
           <p className="signal-note">{signal.note}</p>
         </article>
       ))}
+    </div>
+  );
+}
+
+function LightsPanel({
+  onRefresh,
+  state,
+}: {
+  onRefresh: () => void;
+  state: LightsState;
+}) {
+  if (state.status === "loading") {
+    return <p>Loading lights...</p>;
+  }
+
+  if (state.status === "error") {
+    return <p>{state.message}</p>;
+  }
+
+  const { data } = state;
+
+  if (!data.configured) {
+    return <p>Configure HA_URL and HA_TOKEN to load lights.</p>;
+  }
+
+  if (!data.connected) {
+    return <p>{data.error}</p>;
+  }
+
+  const available = data.lights.filter((light) => light.isAvailable);
+  const unavailable = data.lights.filter((light) => !light.isAvailable);
+
+  return (
+    <div className="lights-panel">
+      <div className="panel-actions">
+        <p className="panel-muted">
+          {available.length} available · {unavailable.length} unavailable
+        </p>
+        <button className="secondary-button" onClick={onRefresh} type="button">
+          Refresh
+        </button>
+      </div>
+
+      <div className="lights-overview-grid">
+        <StatusMetric label="Total lights" value={String(data.lights.length)} />
+        <StatusMetric label="Available" value={String(available.length)} />
+        <StatusMetric label="Unavailable" value={String(unavailable.length)} />
+        <StatusMetric
+          label="On now"
+          value={String(data.lights.filter((light) => light.state === "on").length)}
+        />
+      </div>
+
+      <ul className="lights-grid">
+        {data.lights.slice(0, 24).map((light) => (
+          <li
+            className={`light-card ${light.isAvailable ? "light-card-live" : "light-card-offline"}`}
+            key={light.entityId}
+          >
+            <div className="light-card-top">
+              <p className="light-name">{light.name}</p>
+              <span className="module-status">{light.state}</span>
+            </div>
+            <p className="light-meta">{light.area ?? "No area assigned"}</p>
+            <p className="light-meta">
+              {light.brightnessPercent !== null
+                ? `${light.brightnessPercent}% brightness`
+                : light.colorMode ?? "On/off light"}
+            </p>
+          </li>
+        ))}
+      </ul>
+
+      {data.lights.length > 24 ? (
+        <p className="panel-muted">
+          Showing 24 of {data.lights.length} lights. This keeps the iPad layout usable while
+          still surfacing the full lighting footprint.
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -1001,6 +1144,7 @@ function buildOverviewStats(
   tasks: TasksState,
   calendar: CalendarState,
   choreOps: ChoreOpsState,
+  lights: LightsState,
 ) {
   const deviceCount =
     homeAssistant.status === "ready" && homeAssistant.data.connected
@@ -1027,6 +1171,10 @@ function buildOverviewStats(
           ? "Install setup"
           : "Missing"
       : "—";
+  const lightsValue =
+    lights.status === "ready" && lights.data.connected
+      ? String(lights.data.lights.filter((light) => light.isAvailable).length)
+      : "—";
 
   return [
     {
@@ -1048,6 +1196,11 @@ function buildOverviewStats(
       label: "Kid system",
       value: choreOpsValue,
       note: "ChoreOps will power chores, points, and rewards for Colton.",
+    },
+    {
+      label: "Live lights",
+      value: lightsValue,
+      note: "Available light entities surfaced for the lighting module.",
     },
   ];
 }
@@ -1269,4 +1422,55 @@ function getTodayChoreCopy(state: ChoreOpsState) {
   }
 
   return "ChoreOps has not appeared yet in Home Assistant runtime data.";
+}
+
+function getLightsSummary(state: LightsState) {
+  if (state.status === "loading") {
+    return "Loading";
+  }
+
+  if (state.status === "error") {
+    return "Issue";
+  }
+
+  if (!state.data.connected) {
+    return "Offline";
+  }
+
+  return `${state.data.lights.filter((light) => light.isAvailable).length} live`;
+}
+
+function getLightsTone(state: LightsState): "good" | "neutral" | "warn" {
+  if (state.status === "error") {
+    return "warn";
+  }
+
+  if (state.status === "ready" && state.data.connected) {
+    return "good";
+  }
+
+  return "neutral";
+}
+
+function getTodayLightsHeadline(state: LightsState) {
+  if (state.status !== "ready" || !state.data.connected) {
+    return "Light sync pending";
+  }
+
+  const live = state.data.lights.filter((light) => light.isAvailable).length;
+  const total = state.data.lights.length;
+
+  return `${live} of ${total} lights reachable`;
+}
+
+function getTodayLightsCopy(state: LightsState) {
+  if (state.status !== "ready" || !state.data.connected) {
+    return "The lighting panel will report fixture availability as soon as Home Assistant light data loads.";
+  }
+
+  const unavailable = state.data.lights.filter((light) => !light.isAvailable).length;
+
+  return unavailable > 0
+    ? `${unavailable} lights are currently unavailable, so the panel emphasizes availability alongside fixture names.`
+    : "All visible lights are currently reachable from Home Assistant.";
 }

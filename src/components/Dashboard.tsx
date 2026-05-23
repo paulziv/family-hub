@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type {
   HomeAssistantCalendarResponse,
+  HomeAssistantChoreOpsResponse,
   HomeAssistantStatus,
   HomeAssistantTasksResponse,
 } from "@/lib/homeAssistant";
@@ -20,6 +21,11 @@ type TasksState =
 type CalendarState =
   | { status: "loading" }
   | { status: "ready"; data: HomeAssistantCalendarResponse }
+  | { status: "error"; message: string };
+
+type ChoreOpsState =
+  | { status: "loading" }
+  | { status: "ready"; data: HomeAssistantChoreOpsResponse }
   | { status: "error"; message: string };
 
 const DOMAIN_LABELS: Record<string, string> = {
@@ -42,6 +48,7 @@ export function Dashboard() {
   });
   const [tasks, setTasks] = useState<TasksState>({ status: "loading" });
   const [calendar, setCalendar] = useState<CalendarState>({ status: "loading" });
+  const [choreOps, setChoreOps] = useState<ChoreOpsState>({ status: "loading" });
   const [newTaskSummary, setNewTaskSummary] = useState("");
   const [taskActionMessage, setTaskActionMessage] = useState<string | null>(null);
   const [taskActionPending, setTaskActionPending] = useState(false);
@@ -168,17 +175,49 @@ export function Dashboard() {
     }
   }
 
+  async function loadChoreOps(signal?: AbortSignal) {
+    try {
+      setChoreOps((current) =>
+        current.status === "ready" ? current : { status: "loading" },
+      );
+
+      const response = await fetch("/api/home-assistant/choreops", {
+        cache: "no-store",
+        signal,
+      });
+
+      if (!response.ok) {
+        throw new Error("Unable to load ChoreOps status.");
+      }
+
+      const data = (await response.json()) as HomeAssistantChoreOpsResponse;
+      setChoreOps({ status: "ready", data });
+    } catch (error) {
+      if (signal?.aborted) {
+        return;
+      }
+
+      setChoreOps({
+        status: "error",
+        message:
+          error instanceof Error ? error.message : "Unable to load ChoreOps status.",
+      });
+    }
+  }
+
   useEffect(() => {
     const controller = new AbortController();
 
     void loadHomeAssistantStatus(controller.signal);
     void loadTasks(controller.signal);
     void loadCalendar(controller.signal);
+    void loadChoreOps(controller.signal);
 
     const refreshId = window.setInterval(() => {
       void loadHomeAssistantStatus(controller.signal);
       void loadTasks(controller.signal);
       void loadCalendar(controller.signal);
+      void loadChoreOps(controller.signal);
     }, 60_000);
 
     return () => {
@@ -188,7 +227,7 @@ export function Dashboard() {
   }, []);
 
   const smartHomeStatus = getSmartHomeStatus(homeAssistant);
-  const overviewStats = buildOverviewStats(homeAssistant, tasks, calendar);
+  const overviewStats = buildOverviewStats(homeAssistant, tasks, calendar, choreOps);
 
   return (
     <main className="dashboard-container">
@@ -212,6 +251,11 @@ export function Dashboard() {
             label="Calendar"
             value={getCalendarSummary(calendar)}
             tone={calendar.status === "error" ? "warn" : "neutral"}
+          />
+          <StatusChip
+            label="Colton"
+            value={getChoreOpsSummary(choreOps)}
+            tone={getChoreOpsTone(choreOps)}
           />
         </div>
       </section>
@@ -297,9 +341,9 @@ export function Dashboard() {
           <div className="focus-grid">
             <FocusCard
               title="Colton Chores"
-              detail="ChoreOps"
-              tone="pending"
-              body="Waiting for ChoreOps profile, chores, and rewards to be configured in Home Assistant."
+              detail={getChoreOpsSummary(choreOps)}
+              tone={getChoreOpsFocusTone(choreOps)}
+              body={getChoreOpsBody(choreOps)}
             />
             <FocusCard
               title="Shared Task List"
@@ -314,6 +358,16 @@ export function Dashboard() {
               body="The calendar panel is ready. It will begin surfacing real events as soon as Home Assistant exposes calendar entities."
             />
           </div>
+        </section>
+
+        <section className="glass-panel glass-panel-wide">
+          <h2 className="glass-header">Colton Module</h2>
+          <ChoreOpsPanel
+            onRefresh={() => {
+              void loadChoreOps();
+            }}
+            state={choreOps}
+          />
         </section>
 
         <section className="glass-panel glass-panel-wide">
@@ -651,6 +705,115 @@ function FocusCard({
   );
 }
 
+function ChoreOpsPanel({
+  onRefresh,
+  state,
+}: {
+  onRefresh: () => void;
+  state: ChoreOpsState;
+}) {
+  if (state.status === "loading") {
+    return <p>Loading ChoreOps status...</p>;
+  }
+
+  if (state.status === "error") {
+    return <p>{state.message}</p>;
+  }
+
+  const { data } = state;
+
+  if (!data.configured) {
+    return <p>Configure HA_URL and HA_TOKEN to inspect ChoreOps.</p>;
+  }
+
+  if (!data.connected) {
+    return <p>{data.error}</p>;
+  }
+
+  return (
+    <div className="choreops-panel">
+      <div className="panel-actions">
+        <p className="panel-muted">ChoreOps integration readiness</p>
+        <button className="secondary-button" onClick={onRefresh} type="button">
+          Refresh
+        </button>
+      </div>
+
+      <div className="choreops-status-grid">
+        <StatusMetric
+          label="Package"
+          value={data.choreopsInstalled ? "Installed" : "Missing"}
+        />
+        <StatusMetric
+          label="Integration"
+          value={data.integrationConfigured ? "Configured" : "Not added"}
+        />
+        <StatusMetric
+          label="Service domains"
+          value={String(data.serviceDomains.length)}
+        />
+        <StatusMetric
+          label="Runtime entities"
+          value={String(data.entities.length)}
+        />
+      </div>
+
+      {data.integrationConfigured ? (
+        <p className="panel-muted">
+          ChoreOps is configured in Home Assistant. As profile, reward, and chore
+          entities appear, this panel can graduate into the full Colton workflow.
+        </p>
+      ) : (
+        <ol className="checklist">
+          <li>Add the ChoreOps integration in Home Assistant.</li>
+          <li>Create the Colton profile.</li>
+          <li>Add starter chores and rewards.</li>
+          <li>Return here and refresh to detect the runtime surface.</li>
+        </ol>
+      )}
+
+      {data.serviceDomains.length > 0 ? (
+        <div className="entity-block">
+          <p className="entity-block-title">Detected service domains</p>
+          <div className="pill-row">
+            {data.serviceDomains.map((domain) => (
+              <span className="module-status" key={domain}>
+                {domain}
+              </span>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {data.entities.length > 0 ? (
+        <div className="entity-block">
+          <p className="entity-block-title">Detected ChoreOps-related entities</p>
+          <ul className="entity-list">
+            {data.entities.slice(0, 8).map((entity) => (
+              <li className="entity-list-item" key={entity.entityId}>
+                <div>
+                  <p className="task-summary">{entity.name}</p>
+                  <p className="task-meta">{entity.entityId}</p>
+                </div>
+                <span className="module-status">{entity.state}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function StatusMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <article className="status-metric">
+      <p className="overview-label">{label}</p>
+      <p className="status-metric-value">{value}</p>
+    </article>
+  );
+}
+
 function ModuleRow({
   note,
   status,
@@ -766,6 +929,7 @@ function buildOverviewStats(
   homeAssistant: LoadState,
   tasks: TasksState,
   calendar: CalendarState,
+  choreOps: ChoreOpsState,
 ) {
   const deviceCount =
     homeAssistant.status === "ready" && homeAssistant.data.connected
@@ -783,6 +947,14 @@ function buildOverviewStats(
             0,
           ),
         )
+      : "—";
+  const choreOpsValue =
+    choreOps.status === "ready" && choreOps.data.connected
+      ? choreOps.data.integrationConfigured
+        ? "Ready"
+        : choreOps.data.choreopsInstalled
+          ? "Install setup"
+          : "Missing"
       : "—";
 
   return [
@@ -803,8 +975,80 @@ function buildOverviewStats(
     },
     {
       label: "Kid system",
-      value: "Pending",
+      value: choreOpsValue,
       note: "ChoreOps will power chores, points, and rewards for Colton.",
     },
   ];
+}
+
+function getChoreOpsSummary(state: ChoreOpsState) {
+  if (state.status === "loading") {
+    return "Loading";
+  }
+
+  if (state.status === "error") {
+    return "Issue";
+  }
+
+  if (!state.data.connected) {
+    return "Offline";
+  }
+
+  if (state.data.integrationConfigured) {
+    return `${state.data.entities.length} entities`;
+  }
+
+  if (state.data.choreopsInstalled) {
+    return "Needs setup";
+  }
+
+  return "Not installed";
+}
+
+function getChoreOpsTone(state: ChoreOpsState): "good" | "neutral" | "warn" {
+  if (state.status === "error") {
+    return "warn";
+  }
+
+  if (state.status === "ready" && state.data.connected && state.data.integrationConfigured) {
+    return "good";
+  }
+
+  return "neutral";
+}
+
+function getChoreOpsFocusTone(state: ChoreOpsState): "good" | "pending" | "warn" {
+  if (state.status === "error") {
+    return "warn";
+  }
+
+  if (state.status === "ready" && state.data.connected && state.data.integrationConfigured) {
+    return "good";
+  }
+
+  return "pending";
+}
+
+function getChoreOpsBody(state: ChoreOpsState) {
+  if (state.status === "loading") {
+    return "Checking Home Assistant for the ChoreOps runtime surface.";
+  }
+
+  if (state.status === "error") {
+    return "The ChoreOps readiness check is failing. Resolve Home Assistant connectivity first.";
+  }
+
+  if (!state.data.connected) {
+    return "Home Assistant is not reachable, so ChoreOps readiness cannot be determined.";
+  }
+
+  if (state.data.integrationConfigured) {
+    return "ChoreOps is configured in Home Assistant. The next step is to map Colton-specific chores, rewards, and approvals into the dashboard UI.";
+  }
+
+  if (state.data.choreopsInstalled) {
+    return "The ChoreOps package is installed, but the Home Assistant integration entry has not been completed yet.";
+  }
+
+  return "ChoreOps is not visible yet in Home Assistant. Install and configure it to begin the kid workflow.";
 }

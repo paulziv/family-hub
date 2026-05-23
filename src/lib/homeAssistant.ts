@@ -86,6 +86,44 @@ export type HomeAssistantCalendar = {
   events: HomeAssistantCalendarEvent[];
 };
 
+export type HomeAssistantChoreOpsEntity = {
+  entityId: string;
+  name: string;
+  state: string;
+};
+
+export type HomeAssistantChoreOpsResponse =
+  | {
+      configured: false;
+      connected: false;
+      choreopsInstalled: false;
+      integrationConfigured: false;
+      entities: [];
+      serviceDomains: [];
+      warnings: string[];
+      error: string;
+    }
+  | {
+      configured: true;
+      connected: true;
+      choreopsInstalled: boolean;
+      integrationConfigured: boolean;
+      entities: HomeAssistantChoreOpsEntity[];
+      serviceDomains: string[];
+      warnings: string[];
+      updatedAt: string;
+    }
+  | {
+      configured: true;
+      connected: false;
+      choreopsInstalled: false;
+      integrationConfigured: false;
+      entities: [];
+      serviceDomains: [];
+      warnings: string[];
+      error: string;
+    };
+
 export type HomeAssistantTasksResponse =
   | {
       configured: false;
@@ -289,6 +327,16 @@ type CalendarListItem = {
   name: string;
 };
 
+type ConfigEntry = {
+  domain: string;
+  title: string;
+};
+
+type ServiceRegistryDomain = {
+  domain: string;
+  services: Record<string, unknown>;
+};
+
 type CalendarEventApiItem = {
   summary?: string;
   description?: string;
@@ -349,6 +397,41 @@ async function callTodoService(
   }
 
   return (await response.json()) as TodoServiceResponse;
+}
+
+async function fetchHomeAssistantJson<T>(
+  config: HomeAssistantConfig,
+  path: string,
+): Promise<T> {
+  const response = await fetch(`${getApiBaseUrl(config)}${path}`, {
+    headers: getApiHeaders(config),
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error(`Home Assistant request failed for ${path} (${response.status}).`);
+  }
+
+  return (await response.json()) as T;
+}
+
+function getEntityName(entity: HassEntity) {
+  return (
+    (entity.attributes.friendly_name as string | undefined) ?? entity.entity_id
+  );
+}
+
+function matchesChoreOpsEntity(entity: HassEntity) {
+  const haystack = `${entity.entity_id} ${getEntityName(entity)}`.toLowerCase();
+
+  return (
+    haystack.includes("choreops") ||
+    haystack.includes("reward") ||
+    haystack.includes("allowance") ||
+    haystack.includes("streak") ||
+    haystack.includes("badge") ||
+    haystack.includes("points")
+  );
 }
 
 export async function getHomeAssistantStatus(): Promise<HomeAssistantStatus> {
@@ -568,6 +651,78 @@ export async function getHomeAssistantCalendar(): Promise<HomeAssistantCalendarR
       configured: true,
       connected: false,
       calendars: [],
+      warnings: getWarnings(config),
+      error: toErrorMessage(error),
+    };
+  }
+}
+
+export async function getHomeAssistantChoreOps(): Promise<HomeAssistantChoreOpsResponse> {
+  const config = getConfig();
+
+  if (!config) {
+    return {
+      configured: false,
+      connected: false,
+      choreopsInstalled: false,
+      integrationConfigured: false,
+      entities: [],
+      serviceDomains: [],
+      warnings: [],
+      error: "Missing HA_URL or HA_TOKEN.",
+    };
+  }
+
+  try {
+    await withTimeout(getConnection(config), CONNECTION_TIMEOUT_MS);
+
+    const [entities, configEntries, services] = await Promise.all([
+      fetchHomeAssistantJson<HassEntity[]>(config, "/api/states"),
+      fetchHomeAssistantJson<ConfigEntry[]>(
+        config,
+        "/api/config/config_entries/entry",
+      ),
+      fetchHomeAssistantJson<ServiceRegistryDomain[]>(config, "/api/services"),
+    ]);
+
+    const choreopsEntities = entities
+      .filter(matchesChoreOpsEntity)
+      .map((entity) => ({
+        entityId: entity.entity_id,
+        name: getEntityName(entity),
+        state: entity.state,
+      }))
+      .sort((left, right) => left.name.localeCompare(right.name));
+
+    const choreopsEntry = configEntries.some((entry) => entry.domain === "choreops");
+    const serviceDomains = services
+      .filter((domain) => domain.domain.toLowerCase().includes("chore"))
+      .map((domain) => domain.domain)
+      .sort();
+    const choreopsInstalled = choreopsEntities.some((entity) =>
+      entity.entityId === "update.choreops_update",
+    );
+
+    return {
+      configured: true,
+      connected: true,
+      choreopsInstalled,
+      integrationConfigured: choreopsEntry,
+      entities: choreopsEntities,
+      serviceDomains,
+      warnings: getWarnings(config),
+      updatedAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    resetConnection();
+
+    return {
+      configured: true,
+      connected: false,
+      choreopsInstalled: false,
+      integrationConfigured: false,
+      entities: [],
+      serviceDomains: [],
       warnings: getWarnings(config),
       error: toErrorMessage(error),
     };

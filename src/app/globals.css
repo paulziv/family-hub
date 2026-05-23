@@ -192,6 +192,38 @@ body::after {
   padding: 0.95rem 1rem;
 }
 
+.signal-grid {
+  display: grid;
+  gap: 0.9rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.signal-card {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 18px;
+  min-height: 135px;
+  padding: 0.95rem 1rem;
+}
+
+.signal-label {
+  color: rgba(248, 250, 252, 0.62);
+  font-size: 0.83rem;
+  text-transform: uppercase;
+}
+
+.signal-value {
+  font-size: 1.55rem;
+  font-weight: 600;
+  margin-top: 0.7rem;
+}
+
+.signal-note {
+  color: rgba(248, 250, 252, 0.7);
+  line-height: 1.45;
+  margin-top: 0.55rem;
+}
+
 .task-summary {
   font-weight: 500;
 }
@@ -286,6 +318,40 @@ body::after {
   max-width: 54rem;
 }
 
+.hero-meta-row {
+  align-items: center;
+  display: flex;
+  gap: 1rem;
+  margin-top: 1.4rem;
+}
+
+.hero-time-block,
+.hero-note-block {
+  backdrop-filter: blur(16px);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 18px;
+  display: grid;
+  padding: 0.9rem 1rem;
+}
+
+.hero-time {
+  font-size: 1.35rem;
+  font-weight: 600;
+}
+
+.hero-date,
+.hero-note-copy {
+  color: rgba(248, 250, 252, 0.7);
+  margin-top: 0.2rem;
+}
+
+.hero-note-label {
+  color: rgba(248, 250, 252, 0.95);
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+
 .hero-chip-row {
   display: grid;
   gap: 0.85rem;
@@ -328,6 +394,40 @@ body::after {
   gap: 1rem;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   margin-bottom: 2rem;
+}
+
+.today-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-bottom: 2rem;
+}
+
+.today-card {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03));
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 22px;
+  min-height: 170px;
+  padding: 1.15rem 1.2rem;
+}
+
+.today-label {
+  color: rgba(248, 250, 252, 0.62);
+  font-size: 0.85rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.today-title {
+  font-size: 1.35rem;
+  font-weight: 600;
+  margin-top: 0.7rem;
+}
+
+.today-copy {
+  color: rgba(248, 250, 252, 0.72);
+  line-height: 1.55;
+  margin-top: 0.8rem;
 }
 
 .overview-card {
@@ -494,8 +594,18 @@ body::after {
 @media (max-width: 960px) {
   .hero-shell,
   .overview-grid,
+  .today-grid,
   .focus-grid,
   .choreops-status-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .hero-meta-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .signal-grid {
     grid-template-columns: 1fr;
   }
 

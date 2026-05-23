@@ -52,6 +52,7 @@ export function Dashboard() {
   const [newTaskSummary, setNewTaskSummary] = useState("");
   const [taskActionMessage, setTaskActionMessage] = useState<string | null>(null);
   const [taskActionPending, setTaskActionPending] = useState(false);
+  const [now, setNow] = useState(() => new Date());
 
   async function loadHomeAssistantStatus(signal?: AbortSignal) {
     try {
@@ -226,8 +227,19 @@ export function Dashboard() {
     };
   }, []);
 
+  useEffect(() => {
+    const timerId = window.setInterval(() => {
+      setNow(new Date());
+    }, 30_000);
+
+    return () => {
+      window.clearInterval(timerId);
+    };
+  }, []);
+
   const smartHomeStatus = getSmartHomeStatus(homeAssistant);
   const overviewStats = buildOverviewStats(homeAssistant, tasks, calendar, choreOps);
+  const householdSignals = buildHouseholdSignals(homeAssistant);
 
   return (
     <main className="dashboard-container">
@@ -239,6 +251,18 @@ export function Dashboard() {
             One place for household status, shared tasks, upcoming events, and
             kid workflows as they come online.
           </p>
+          <div className="hero-meta-row">
+            <div className="hero-time-block">
+              <span className="hero-time">{formatHeroTime(now)}</span>
+              <span className="hero-date">{formatHeroDate(now)}</span>
+            </div>
+            <div className="hero-note-block">
+              <span className="hero-note-label">House pulse</span>
+              <span className="hero-note-copy">
+                Tasks, calendars, and kid workflows refresh every minute.
+              </span>
+            </div>
+          </div>
         </div>
         <div className="hero-chip-row">
           <StatusChip label="Home" value={smartHomeStatus} tone={getStatusTone(smartHomeStatus)} />
@@ -270,6 +294,30 @@ export function Dashboard() {
         ))}
       </section>
 
+      <section className="today-grid">
+        <article className="today-card">
+          <p className="today-label">Next task moment</p>
+          <p className="today-title">{getTodayTaskHeadline(tasks)}</p>
+          <p className="today-copy">
+            {getTodayTaskCopy(tasks)}
+          </p>
+        </article>
+        <article className="today-card">
+          <p className="today-label">Upcoming calendar</p>
+          <p className="today-title">{getTodayCalendarHeadline(calendar)}</p>
+          <p className="today-copy">
+            {getTodayCalendarCopy(calendar)}
+          </p>
+        </article>
+        <article className="today-card">
+          <p className="today-label">Kid workflow</p>
+          <p className="today-title">{getTodayChoreHeadline(choreOps)}</p>
+          <p className="today-copy">
+            {getTodayChoreCopy(choreOps)}
+          </p>
+        </article>
+      </section>
+
       <div className="grid-layout">
         <section className="glass-panel">
           <div className="panel-actions">
@@ -288,6 +336,11 @@ export function Dashboard() {
           <div className="panel-detail">
             <SmartHomeDetails state={homeAssistant} />
           </div>
+        </section>
+
+        <section className="glass-panel">
+          <h2 className="glass-header">Household Signals</h2>
+          <SignalPanel signals={householdSignals} />
         </section>
 
         <section className="glass-panel">
@@ -463,6 +516,24 @@ function SmartHomeDetails({ state }: { state: LoadState }) {
         </p>
       ))}
     </>
+  );
+}
+
+function SignalPanel({
+  signals,
+}: {
+  signals: Array<{ label: string; note: string; value: string }>;
+}) {
+  return (
+    <div className="signal-grid">
+      {signals.map((signal) => (
+        <article className="signal-card" key={signal.label}>
+          <p className="signal-label">{signal.label}</p>
+          <p className="signal-value">{signal.value}</p>
+          <p className="signal-note">{signal.note}</p>
+        </article>
+      ))}
+    </div>
   );
 }
 
@@ -1051,4 +1122,151 @@ function getChoreOpsBody(state: ChoreOpsState) {
   }
 
   return "ChoreOps is not visible yet in Home Assistant. Install and configure it to begin the kid workflow.";
+}
+
+function formatHeroTime(date: Date) {
+  return date.toLocaleTimeString(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function formatHeroDate(date: Date) {
+  return date.toLocaleDateString(undefined, {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+  });
+}
+
+function buildHouseholdSignals(homeAssistant: LoadState) {
+  if (homeAssistant.status !== "ready" || !homeAssistant.data.connected) {
+    return [
+      {
+        label: "Occupancy",
+        value: "—",
+        note: "Waiting for Home Assistant connection.",
+      },
+      {
+        label: "Lighting",
+        value: "—",
+        note: "Lighting counts appear when Home Assistant is reachable.",
+      },
+      {
+        label: "Climate",
+        value: "—",
+        note: "Climate devices appear here when connected.",
+      },
+    ];
+  }
+
+  const domains = homeAssistant.data.entitiesByDomain;
+
+  return [
+    {
+      label: "Occupancy",
+      value: String((domains.person ?? 0) + (domains.device_tracker ?? 0)),
+      note: "People and trackers currently exposed to the dashboard.",
+    },
+    {
+      label: "Lighting",
+      value: String(domains.light ?? 0),
+      note: "Lights currently visible through Home Assistant.",
+    },
+    {
+      label: "Climate",
+      value: String(domains.climate ?? 0),
+      note: "Climate devices ready for future comfort controls.",
+    },
+    {
+      label: "Security",
+      value: String((domains.lock ?? 0) + (domains.cover ?? 0)),
+      note: "Locks and covers ready for future access panels.",
+    },
+  ];
+}
+
+function getTodayTaskHeadline(state: TasksState) {
+  if (state.status !== "ready" || !state.data.connected) {
+    return "Task sync pending";
+  }
+
+  const firstList = state.data.lists[0];
+
+  if (!firstList) {
+    return "No task lists yet";
+  }
+
+  return firstList.items[0]?.summary ?? "Queue is clear";
+}
+
+function getTodayTaskCopy(state: TasksState) {
+  if (state.status !== "ready" || !state.data.connected) {
+    return "The shared household list will appear here once Home Assistant task data is available.";
+  }
+
+  const total = state.data.lists.reduce((sum, list) => sum + list.incompleteCount, 0);
+
+  return total > 0
+    ? `${total} open household tasks across ${state.data.lists.length} list${state.data.lists.length === 1 ? "" : "s"}.`
+    : "No open household tasks right now.";
+}
+
+function getTodayCalendarHeadline(state: CalendarState) {
+  if (state.status !== "ready" || !state.data.connected) {
+    return "Calendar sync pending";
+  }
+
+  const nextEvent = state.data.calendars
+    .flatMap((calendar) => calendar.events)
+    .sort((left, right) => left.start.localeCompare(right.start))[0];
+
+  return nextEvent?.summary ?? "No upcoming events";
+}
+
+function getTodayCalendarCopy(state: CalendarState) {
+  if (state.status !== "ready" || !state.data.connected) {
+    return "Upcoming family events will show here once calendars are available in Home Assistant.";
+  }
+
+  const total = state.data.calendars.reduce(
+    (sum, calendar) => sum + calendar.events.length,
+    0,
+  );
+
+  return total > 0
+    ? `${total} event${total === 1 ? "" : "s"} in the next 7 days.`
+    : "No events scheduled in the next 7 days.";
+}
+
+function getTodayChoreHeadline(state: ChoreOpsState) {
+  if (state.status !== "ready" || !state.data.connected) {
+    return "ChoreOps check pending";
+  }
+
+  if (state.data.integrationConfigured) {
+    return "Colton workflow ready";
+  }
+
+  if (state.data.choreopsInstalled) {
+    return "Finish ChoreOps setup";
+  }
+
+  return "Install ChoreOps";
+}
+
+function getTodayChoreCopy(state: ChoreOpsState) {
+  if (state.status !== "ready" || !state.data.connected) {
+    return "The kid workflow module will update automatically once Home Assistant is reachable.";
+  }
+
+  if (state.data.integrationConfigured) {
+    return `${state.data.entities.length} related entities detected so far. The dashboard is ready for the next kid-facing layer.`;
+  }
+
+  if (state.data.choreopsInstalled) {
+    return "The package exists in Home Assistant, but the integration entry still needs profile, chore, and reward setup.";
+  }
+
+  return "ChoreOps has not appeared yet in Home Assistant runtime data.";
 }

@@ -130,6 +130,11 @@ body::after {
   gap: 1rem;
 }
 
+.routine-panel {
+  display: grid;
+  gap: 1rem;
+}
+
 .task-form {
   display: flex;
   gap: 0.75rem;
@@ -150,7 +155,8 @@ body::after {
   color: rgba(248, 250, 252, 0.45);
 }
 
-.task-list {
+.task-list,
+.routine-list {
   display: grid;
   gap: 0.75rem;
   list-style: none;
@@ -162,7 +168,8 @@ body::after {
   list-style: none;
 }
 
-.task-list-item {
+.task-list-item,
+.routine-list-item {
   align-items: center;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -277,6 +284,18 @@ body::after {
   margin-top: 0.45rem;
 }
 
+.light-actions {
+  display: grid;
+  gap: 0.55rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 0.9rem;
+}
+
+.light-action-button {
+  min-height: 42px;
+  padding-inline: 0.75rem;
+}
+
 .task-summary {
   font-weight: 500;
 }
@@ -302,6 +321,16 @@ body::after {
 .secondary-button:hover {
   background: rgba(255, 255, 255, 0.14);
   border-color: rgba(255, 255, 255, 0.28);
+}
+
+.secondary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.secondary-button:disabled:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.18);
 }
 
 .status-meta {

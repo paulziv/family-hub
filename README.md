@@ -1,64 +1,105 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Family Hub
 
-## Getting Started
+Family Hub is a Next.js dashboard for Home Assistant household status, iPad control panels, shared tasks, lights, calendars, ChoreOps readiness, and approved routines.
 
-First, run the development server:
+Production runs on `zivnas` in Docker at:
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+```text
+http://zivnas:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Current Capabilities
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- Home Assistant health and entity summary.
+- Light inventory with approved on/off controls.
+- Home Assistant to-do list read/add/complete.
+- Calendar panel with setup guidance when HA calendar integration is unavailable.
+- ChoreOps readiness panel.
+- Allowlisted Home Assistant script/routine controls.
+- Docker deployment to Synology.
 
-## Home Assistant
+## Local Development
 
-Family Hub reads Home Assistant from server-side API routes. Configure these
-values in `.env.local` for local development and in your production runtime for
-deployment:
+Install dependencies:
 
 ```bash
-HA_URL="http://homeassistant.local:8123"
-HA_TOKEN="your-long-lived-access-token"
+npm install
 ```
 
-Use server-only `HA_URL` and `HA_TOKEN`. Do not use `NEXT_PUBLIC_*` names for
-Home Assistant credentials because those variables are exposed to browser
-JavaScript.
-
-You can start from the checked-in example file:
+Create local env:
 
 ```bash
 cp .env.example .env.local
 ```
 
-The dashboard currently calls:
+Required env:
 
-- `/api/health` for a basic app health check
-- `/api/home-assistant/status` for Home Assistant connectivity and entity counts
-- `/api/home-assistant/tasks` for to-do lists and task actions
-- `/api/home-assistant/calendar` for upcoming events
+```bash
+HA_URL=http://homeassistant.local:8123
+HA_TOKEN=your-long-lived-access-token
+FAMILY_HUB_APPROVED_SCRIPTS=script.great_room_led_kick
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Run locally:
 
-## Learn More
+```bash
+npm run dev
+```
 
-To learn more about Next.js, take a look at the following resources:
+Open:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```text
+http://localhost:3000
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Verification
 
-## Deploy on Vercel
+```bash
+npm run lint
+npm run build
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+API smoke checks:
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```bash
+curl http://localhost:3000/api/health
+curl http://localhost:3000/api/home-assistant/status
+curl http://localhost:3000/api/home-assistant/scripts
+```
+
+## Deployment
+
+Production files live on `zivnas` at:
+
+```bash
+/volume1/docker/family-hub
+```
+
+Deploy from the local repo:
+
+```bash
+scripts/deploy-zivnas.sh
+```
+
+The deploy script:
+
+- runs local lint,
+- runs local production build,
+- syncs source to `zivnas`,
+- preserves `/volume1/docker/family-hub/.env.production`,
+- rebuilds the Docker image,
+- restarts the `family-hub` container.
+
+See [docs/deployment.md](docs/deployment.md) for the full NAS runbook.
+
+## Security Model
+
+- Home Assistant credentials stay server-side in `.env.local` or NAS `.env.production`.
+- Do not use `NEXT_PUBLIC_*` for Home Assistant secrets.
+- Light controls are restricted to `light.*` entities.
+- Routine controls are restricted to `FAMILY_HUB_APPROVED_SCRIPTS`.
+- Arbitrary Home Assistant service calls are intentionally not exposed.
+
+## Roadmap
+
+See [docs/project-plan.md](docs/project-plan.md).

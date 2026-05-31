@@ -102,6 +102,12 @@ export type HomeAssistantChoreOpsEntity = {
   state: string;
 };
 
+export type HomeAssistantScript = {
+  entityId: string;
+  name: string;
+  state: string;
+};
+
 export type HomeAssistantChoreOpsResponse =
   | {
       configured: false;
@@ -203,6 +209,29 @@ export type HomeAssistantLightsResponse =
       error: string;
     };
 
+export type HomeAssistantScriptsResponse =
+  | {
+      configured: false;
+      connected: false;
+      scripts: [];
+      warnings: string[];
+      error: string;
+    }
+  | {
+      configured: true;
+      connected: true;
+      scripts: HomeAssistantScript[];
+      warnings: string[];
+      updatedAt: string;
+    }
+  | {
+      configured: true;
+      connected: false;
+      scripts: [];
+      warnings: string[];
+      error: string;
+    };
+
 let connectionPromise: Promise<Connection> | null = null;
 let activeConnection: Connection | null = null;
 let activeConnectionKey: string | null = null;
@@ -218,8 +247,17 @@ function getConfig(): HomeAssistantConfig | null {
   return { url, token };
 }
 
-function getWarnings(_: HomeAssistantConfig): string[] {
+function getWarnings(): string[] {
   return [];
+}
+
+function getApprovedScriptIds() {
+  return new Set(
+    (process.env.FAMILY_HUB_APPROVED_SCRIPTS ?? "")
+      .split(",")
+      .map((entityId) => entityId.trim())
+      .filter((entityId) => entityId.startsWith("script.")),
+  );
 }
 
 function getApiBaseUrl(config: HomeAssistantConfig) {
@@ -432,6 +470,29 @@ async function callTodoService(
   return (await response.json()) as TodoServiceResponse;
 }
 
+async function callHomeAssistantService(
+  config: HomeAssistantConfig,
+  domain: string,
+  service: string,
+  payload: Record<string, unknown>,
+) {
+  const response = await fetch(
+    `${getApiBaseUrl(config)}/api/services/${domain}/${service}`,
+    {
+      method: "POST",
+      headers: getApiHeaders(config),
+      body: JSON.stringify(payload),
+      cache: "no-store",
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      `Home Assistant ${domain}.${service} failed with ${response.status}.`,
+    );
+  }
+}
+
 async function fetchHomeAssistantJson<T>(
   config: HomeAssistantConfig,
   path: string,
@@ -484,6 +545,14 @@ function mapLightEntity(entity: HassEntity): HomeAssistantLight {
   };
 }
 
+function mapScriptEntity(entity: HassEntity): HomeAssistantScript {
+  return {
+    entityId: entity.entity_id,
+    name: getEntityName(entity),
+    state: entity.state,
+  };
+}
+
 export async function getHomeAssistantStatus(): Promise<HomeAssistantStatus> {
   const config = getConfig();
 
@@ -510,7 +579,7 @@ export async function getHomeAssistantStatus(): Promise<HomeAssistantStatus> {
       connected: true,
       entityCount: entities.length,
       entitiesByDomain: summarizeEntities(entities),
-      warnings: getWarnings(config),
+      warnings: getWarnings(),
       haVersion: connection.haVersion,
       updatedAt: new Date().toISOString(),
     };
@@ -522,7 +591,7 @@ export async function getHomeAssistantStatus(): Promise<HomeAssistantStatus> {
       connected: false,
       entityCount: 0,
       entitiesByDomain: {},
-      warnings: getWarnings(config),
+      warnings: getWarnings(),
       error: toErrorMessage(error),
     };
   }
@@ -581,7 +650,7 @@ export async function getHomeAssistantTasks(): Promise<HomeAssistantTasksRespons
       configured: true,
       connected: true,
       lists,
-      warnings: getWarnings(config),
+      warnings: getWarnings(),
       updatedAt: new Date().toISOString(),
     };
   } catch (error) {
@@ -591,7 +660,7 @@ export async function getHomeAssistantTasks(): Promise<HomeAssistantTasksRespons
       configured: true,
       connected: false,
       lists: [],
-      warnings: getWarnings(config),
+      warnings: getWarnings(),
       error: toErrorMessage(error),
     };
   }
@@ -650,6 +719,19 @@ export async function getHomeAssistantCalendar(): Promise<HomeAssistantCalendarR
       cache: "no-store",
     });
 
+    if (calendarResponse.status === 404) {
+      return {
+        configured: true,
+        connected: true,
+        calendars: [],
+        warnings: [
+          ...getWarnings(),
+          "Home Assistant calendar API returned 404. Add or enable a calendar integration before Family Hub can show events.",
+        ],
+        updatedAt: new Date().toISOString(),
+      };
+    }
+
     if (!calendarResponse.ok) {
       throw new Error(
         `Home Assistant calendars failed with ${calendarResponse.status}.`,
@@ -691,7 +773,7 @@ export async function getHomeAssistantCalendar(): Promise<HomeAssistantCalendarR
       configured: true,
       connected: true,
       calendars: calendarData,
-      warnings: getWarnings(config),
+      warnings: getWarnings(),
       updatedAt: new Date().toISOString(),
     };
   } catch (error) {
@@ -701,7 +783,7 @@ export async function getHomeAssistantCalendar(): Promise<HomeAssistantCalendarR
       configured: true,
       connected: false,
       calendars: [],
-      warnings: getWarnings(config),
+      warnings: getWarnings(),
       error: toErrorMessage(error),
     };
   }
@@ -740,7 +822,7 @@ export async function getHomeAssistantLights(): Promise<HomeAssistantLightsRespo
       configured: true,
       connected: true,
       lights,
-      warnings: getWarnings(config),
+      warnings: getWarnings(),
       updatedAt: new Date().toISOString(),
     };
   } catch (error) {
@@ -750,10 +832,98 @@ export async function getHomeAssistantLights(): Promise<HomeAssistantLightsRespo
       configured: true,
       connected: false,
       lights: [],
-      warnings: getWarnings(config),
+      warnings: getWarnings(),
       error: toErrorMessage(error),
     };
   }
+}
+
+export async function setHomeAssistantLightState(
+  entityId: string,
+  action: "turn_on" | "turn_off",
+) {
+  const config = getConfig();
+
+  if (!config) {
+    throw new Error("Missing HA_URL or HA_TOKEN.");
+  }
+
+  if (!entityId.startsWith("light.")) {
+    throw new Error("Only light entities can be controlled from this panel.");
+  }
+
+  await callHomeAssistantService(config, "light", action, {
+    entity_id: entityId,
+  });
+}
+
+export async function getHomeAssistantScripts(): Promise<HomeAssistantScriptsResponse> {
+  const config = getConfig();
+
+  if (!config) {
+    return {
+      configured: false,
+      connected: false,
+      scripts: [],
+      warnings: [],
+      error: "Missing HA_URL or HA_TOKEN.",
+    };
+  }
+
+  const approvedScriptIds = getApprovedScriptIds();
+
+  try {
+    const connection = await withTimeout(
+      getConnection(config),
+      CONNECTION_TIMEOUT_MS,
+    );
+    const entities = await withTimeout(getStates(connection), CONNECTION_TIMEOUT_MS);
+    const scripts = entities
+      .filter((entity) => approvedScriptIds.has(entity.entity_id))
+      .map(mapScriptEntity)
+      .sort((left, right) => left.name.localeCompare(right.name));
+    const warnings =
+      approvedScriptIds.size === 0
+        ? [
+            ...getWarnings(),
+            "No approved scripts configured. Set FAMILY_HUB_APPROVED_SCRIPTS to expose safe routines.",
+          ]
+        : getWarnings();
+
+    return {
+      configured: true,
+      connected: true,
+      scripts,
+      warnings,
+      updatedAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    resetConnection();
+
+    return {
+      configured: true,
+      connected: false,
+      scripts: [],
+      warnings: getWarnings(),
+      error: toErrorMessage(error),
+    };
+  }
+}
+
+export async function runHomeAssistantScript(entityId: string) {
+  const config = getConfig();
+
+  if (!config) {
+    throw new Error("Missing HA_URL or HA_TOKEN.");
+  }
+
+  if (!getApprovedScriptIds().has(entityId)) {
+    throw new Error("Script is not approved for Family Hub control.");
+  }
+
+  await callHomeAssistantService(config, "script", "turn_on", {
+    entity_id: entityId,
+  });
 }
 
 export async function getHomeAssistantChoreOps(): Promise<HomeAssistantChoreOpsResponse> {
@@ -809,7 +979,7 @@ export async function getHomeAssistantChoreOps(): Promise<HomeAssistantChoreOpsR
       integrationConfigured: choreopsEntry,
       entities: choreopsEntities,
       serviceDomains,
-      warnings: getWarnings(config),
+      warnings: getWarnings(),
       updatedAt: new Date().toISOString(),
     };
   } catch (error) {
@@ -822,7 +992,7 @@ export async function getHomeAssistantChoreOps(): Promise<HomeAssistantChoreOpsR
       integrationConfigured: false,
       entities: [],
       serviceDomains: [],
-      warnings: getWarnings(config),
+      warnings: getWarnings(),
       error: toErrorMessage(error),
     };
   }

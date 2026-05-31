@@ -5,6 +5,7 @@ import type {
   HomeAssistantCalendarResponse,
   HomeAssistantChoreOpsResponse,
   HomeAssistantLightsResponse,
+  HomeAssistantScriptsResponse,
   HomeAssistantStatus,
   HomeAssistantTasksResponse,
 } from "@/lib/homeAssistant";
@@ -34,6 +35,11 @@ type LightsState =
   | { status: "ready"; data: HomeAssistantLightsResponse }
   | { status: "error"; message: string };
 
+type ScriptsState =
+  | { status: "loading" }
+  | { status: "ready"; data: HomeAssistantScriptsResponse }
+  | { status: "error"; message: string };
+
 const DOMAIN_LABELS: Record<string, string> = {
   binary_sensor: "Binary Sensors",
   calendar: "Calendars",
@@ -56,9 +62,14 @@ export function Dashboard() {
   const [calendar, setCalendar] = useState<CalendarState>({ status: "loading" });
   const [choreOps, setChoreOps] = useState<ChoreOpsState>({ status: "loading" });
   const [lights, setLights] = useState<LightsState>({ status: "loading" });
+  const [scripts, setScripts] = useState<ScriptsState>({ status: "loading" });
   const [newTaskSummary, setNewTaskSummary] = useState("");
   const [taskActionMessage, setTaskActionMessage] = useState<string | null>(null);
   const [taskActionPending, setTaskActionPending] = useState(false);
+  const [lightActionEntity, setLightActionEntity] = useState<string | null>(null);
+  const [lightActionMessage, setLightActionMessage] = useState<string | null>(null);
+  const [scriptActionEntity, setScriptActionEntity] = useState<string | null>(null);
+  const [scriptActionMessage, setScriptActionMessage] = useState<string | null>(null);
   const [now, setNow] = useState(() => new Date());
 
   async function loadHomeAssistantStatus(signal?: AbortSignal) {
@@ -242,14 +253,113 @@ export function Dashboard() {
     }
   }
 
+  async function loadScripts(signal?: AbortSignal) {
+    try {
+      setScripts((current) =>
+        current.status === "ready" ? current : { status: "loading" },
+      );
+
+      const response = await fetch("/api/home-assistant/scripts", {
+        cache: "no-store",
+        signal,
+      });
+
+      if (!response.ok) {
+        throw new Error("Unable to load routines.");
+      }
+
+      const data = (await response.json()) as HomeAssistantScriptsResponse;
+      setScripts({ status: "ready", data });
+    } catch (error) {
+      if (signal?.aborted) {
+        return;
+      }
+
+      setScripts({
+        status: "error",
+        message: error instanceof Error ? error.message : "Unable to load routines.",
+      });
+    }
+  }
+
+  async function updateLight(entityId: string, action: "turn_on" | "turn_off") {
+    setLightActionEntity(entityId);
+    setLightActionMessage(null);
+
+    try {
+      const response = await fetch("/api/home-assistant/lights", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ action, entityId }),
+      });
+
+      const payload = (await response.json()) as
+        | HomeAssistantLightsResponse
+        | { error: string };
+
+      if (!response.ok) {
+        throw new Error(
+          "error" in payload ? payload.error : "Unable to update light.",
+        );
+      }
+
+      setLights({ status: "ready", data: payload as HomeAssistantLightsResponse });
+    } catch (error) {
+      setLightActionMessage(
+        error instanceof Error ? error.message : "Unable to update light.",
+      );
+    } finally {
+      setLightActionEntity(null);
+    }
+  }
+
+  async function runScript(entityId: string) {
+    setScriptActionEntity(entityId);
+    setScriptActionMessage(null);
+
+    try {
+      const response = await fetch("/api/home-assistant/scripts", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ entityId }),
+      });
+
+      const payload = (await response.json()) as
+        | HomeAssistantScriptsResponse
+        | { error: string };
+
+      if (!response.ok) {
+        throw new Error(
+          "error" in payload ? payload.error : "Unable to run routine.",
+        );
+      }
+
+      setScripts({ status: "ready", data: payload as HomeAssistantScriptsResponse });
+      setScriptActionMessage("Routine sent to Home Assistant.");
+    } catch (error) {
+      setScriptActionMessage(
+        error instanceof Error ? error.message : "Unable to run routine.",
+      );
+    } finally {
+      setScriptActionEntity(null);
+    }
+  }
+
   useEffect(() => {
     const controller = new AbortController();
 
-    void loadHomeAssistantStatus(controller.signal);
-    void loadTasks(controller.signal);
-    void loadCalendar(controller.signal);
-    void loadChoreOps(controller.signal);
-    void loadLights(controller.signal);
+    const initialRefreshId = window.setTimeout(() => {
+      void loadHomeAssistantStatus(controller.signal);
+      void loadTasks(controller.signal);
+      void loadCalendar(controller.signal);
+      void loadChoreOps(controller.signal);
+      void loadLights(controller.signal);
+      void loadScripts(controller.signal);
+    }, 0);
 
     const refreshId = window.setInterval(() => {
       void loadHomeAssistantStatus(controller.signal);
@@ -257,9 +367,11 @@ export function Dashboard() {
       void loadCalendar(controller.signal);
       void loadChoreOps(controller.signal);
       void loadLights(controller.signal);
+      void loadScripts(controller.signal);
     }, 60_000);
 
     return () => {
+      window.clearTimeout(initialRefreshId);
       window.clearInterval(refreshId);
       controller.abort();
     };
@@ -400,10 +512,30 @@ export function Dashboard() {
         <section className="glass-panel glass-panel-wide">
           <h2 className="glass-header">Lights</h2>
           <LightsPanel
+            actionEntity={lightActionEntity}
+            actionMessage={lightActionMessage}
+            onLightAction={(entityId, action) => {
+              void updateLight(entityId, action);
+            }}
             onRefresh={() => {
               void loadLights();
             }}
             state={lights}
+          />
+        </section>
+
+        <section className="glass-panel">
+          <h2 className="glass-header">Routines</h2>
+          <ScriptsPanel
+            actionEntity={scriptActionEntity}
+            actionMessage={scriptActionMessage}
+            onRefresh={() => {
+              void loadScripts();
+            }}
+            onRun={(entityId) => {
+              void runScript(entityId);
+            }}
+            state={scripts}
           />
         </section>
 
@@ -602,9 +734,15 @@ function SignalPanel({
 }
 
 function LightsPanel({
+  actionEntity,
+  actionMessage,
+  onLightAction,
   onRefresh,
   state,
 }: {
+  actionEntity: string | null;
+  actionMessage: string | null;
+  onLightAction: (entityId: string, action: "turn_on" | "turn_off") => void;
   onRefresh: () => void;
   state: LightsState;
 }) {
@@ -650,24 +788,52 @@ function LightsPanel({
         />
       </div>
 
+      {actionMessage ? <p className="panel-warning">{actionMessage}</p> : null}
+
       <ul className="lights-grid">
-        {data.lights.slice(0, 24).map((light) => (
-          <li
-            className={`light-card ${light.isAvailable ? "light-card-live" : "light-card-offline"}`}
-            key={light.entityId}
-          >
-            <div className="light-card-top">
-              <p className="light-name">{light.name}</p>
-              <span className="module-status">{light.state}</span>
-            </div>
-            <p className="light-meta">{light.area ?? "No area assigned"}</p>
-            <p className="light-meta">
-              {light.brightnessPercent !== null
-                ? `${light.brightnessPercent}% brightness`
-                : light.colorMode ?? "On/off light"}
-            </p>
-          </li>
-        ))}
+        {data.lights.slice(0, 24).map((light) => {
+          const isPending = actionEntity === light.entityId;
+
+          return (
+            <li
+              className={`light-card ${light.isAvailable ? "light-card-live" : "light-card-offline"}`}
+              key={light.entityId}
+            >
+              <div className="light-card-top">
+                <p className="light-name">{light.name}</p>
+                <span className="module-status">{light.state}</span>
+              </div>
+              <p className="light-meta">{light.area ?? "No area assigned"}</p>
+              <p className="light-meta">
+                {light.brightnessPercent !== null
+                  ? `${light.brightnessPercent}% brightness`
+                  : light.colorMode ?? "On/off light"}
+              </p>
+              <div className="light-actions">
+                <button
+                  className="secondary-button light-action-button"
+                  disabled={!light.isAvailable || isPending || light.state === "on"}
+                  onClick={() => {
+                    onLightAction(light.entityId, "turn_on");
+                  }}
+                  type="button"
+                >
+                  On
+                </button>
+                <button
+                  className="secondary-button light-action-button"
+                  disabled={!light.isAvailable || isPending || light.state === "off"}
+                  onClick={() => {
+                    onLightAction(light.entityId, "turn_off");
+                  }}
+                  type="button"
+                >
+                  Off
+                </button>
+              </div>
+            </li>
+          );
+        })}
       </ul>
 
       {data.lights.length > 24 ? (
@@ -676,6 +842,88 @@ function LightsPanel({
           still surfacing the full lighting footprint.
         </p>
       ) : null}
+    </div>
+  );
+}
+
+function ScriptsPanel({
+  actionEntity,
+  actionMessage,
+  onRefresh,
+  onRun,
+  state,
+}: {
+  actionEntity: string | null;
+  actionMessage: string | null;
+  onRefresh: () => void;
+  onRun: (entityId: string) => void;
+  state: ScriptsState;
+}) {
+  if (state.status === "loading") {
+    return <p>Loading routines...</p>;
+  }
+
+  if (state.status === "error") {
+    return <p>{state.message}</p>;
+  }
+
+  const { data } = state;
+
+  if (!data.configured) {
+    return <p>Configure HA_URL and HA_TOKEN to load routines.</p>;
+  }
+
+  if (!data.connected) {
+    return <p>{data.error}</p>;
+  }
+
+  return (
+    <div className="routine-panel">
+      <div className="panel-actions">
+        <p className="panel-muted">
+          {data.scripts.length} approved Home Assistant routines
+        </p>
+        <button className="secondary-button" onClick={onRefresh} type="button">
+          Refresh
+        </button>
+      </div>
+
+      {actionMessage ? <p className="panel-warning">{actionMessage}</p> : null}
+
+      {data.scripts.length > 0 ? (
+        <ul className="routine-list">
+          {data.scripts.map((script) => {
+            const isPending = actionEntity === script.entityId;
+
+            return (
+              <li className="routine-list-item" key={script.entityId}>
+                <div>
+                  <p className="task-summary">{script.name}</p>
+                  <p className="task-meta">{script.entityId}</p>
+                </div>
+                <button
+                  className="secondary-button"
+                  disabled={isPending}
+                  onClick={() => {
+                    onRun(script.entityId);
+                  }}
+                  type="button"
+                >
+                  Run
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <p className="panel-muted">No approved routines are available.</p>
+      )}
+
+      {data.warnings.map((warning) => (
+        <p className="panel-warning" key={warning}>
+          {warning}
+        </p>
+      ))}
     </div>
   );
 }
